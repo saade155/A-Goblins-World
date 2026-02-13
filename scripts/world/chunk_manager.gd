@@ -27,6 +27,24 @@ const LOAD_RADIUS: int = 3
 ## Pixel size of a full chunk (CHUNK_SIZE * TILE_SIZE).
 const PIXEL_CHUNK_SIZE: int = CHUNK_SIZE * TILE_SIZE  # 512
 
+## Torch light radius in tiles.
+const TORCH_RADIUS: int = 8
+
+## Maximum light level a torch emits at its center.
+const TORCH_LIGHT_LEVEL: float = 1.0
+
+## Falloff exponent for torch light attenuation.
+const TORCH_FALLOFF_POWER: float = 1.4
+
+## Minimum ambient light level deep underground.
+const AMBIENT_FLOOR: float = 0.03
+
+## Z-index for darkness overlay sprites (above terrain).
+const DARKNESS_Z_INDEX: int = 5
+
+## Z-index for torch sprites (above darkness overlay).
+const TORCH_SPRITE_Z_INDEX: int = 6
+
 ## The authoritative world data.
 var world_data: WorldData
 
@@ -59,8 +77,8 @@ var generated_chunks: Dictionary = {}  # Vector2i -> bool
 ## Preloaded dropped item scene.
 var _dropped_item_scene: PackedScene
 
-## Canvas modulate for depth-based ambient lighting.
-var canvas_modulate: CanvasModulate
+## Darkness overlay sprites per chunk. Key = chunk_coord, value = Sprite2D.
+var chunk_darkness_sprites: Dictionary = {}
 
 ## Save manager for chunk and world persistence.
 var save_manager: SaveManager
@@ -115,9 +133,6 @@ func _ready() -> void:
 	# Preload dropped item scene
 	_dropped_item_scene = preload("res://scenes/items/dropped_item.tscn")
 
-	# Set up depth-based lighting
-	_setup_lighting()
-
 	print("[ChunkManager] Ready. World seed: %d" % GameState.world_seed)
 
 	# Load torch scene
@@ -159,9 +174,6 @@ func _process(_delta: float) -> void:
 	else:
 		# Normal: generate up to 2 chunks per frame
 		_process_generation_queue()
-
-	# Update depth-based lighting
-	_update_lighting()
 
 	# Track max depth for BehaviorTracker
 	_update_depth_tracking()
@@ -265,6 +277,9 @@ func _load_chunk(chunk_coord: Vector2i) -> void:
 	for tpos in torch_positions:
 		_spawn_torch(tpos)
 
+	# Create per-tile darkness overlay for this chunk
+	_create_darkness_overlay(chunk_coord)
+
 
 ## Unload a chunk from the scene tree. World data is preserved.
 func _unload_chunk(chunk_coord: Vector2i) -> void:
@@ -274,6 +289,11 @@ func _unload_chunk(chunk_coord: Vector2i) -> void:
 	# Save dirty chunks before unloading
 	if world_data.is_chunk_dirty(chunk_coord):
 		save_manager.save_chunk(chunk_coord, world_data)
+
+	# Remove darkness overlay for this chunk
+	if chunk_darkness_sprites.has(chunk_coord):
+		chunk_darkness_sprites[chunk_coord].queue_free()
+		chunk_darkness_sprites.erase(chunk_coord)
 
 	# Remove torch visuals for this chunk
 	var torch_positions: Array = world_data.get_chunk_torches(chunk_coord)
@@ -434,35 +454,131 @@ func _hash_pixel(x: int, y: int) -> float:
 	return absf(float(h % 1000) / 1000.0)
 
 
-# --- Depth-based lighting ---
+# --- Per-tile lighting ---
 
-## Set up the CanvasModulate node for ambient lighting.
-func _setup_lighting() -> void:
-	canvas_modulate = CanvasModulate.new()
-	canvas_modulate.color = Color.WHITE
-	add_child(canvas_modulate)
-
-
-## Update ambient lighting based on player depth.
-func _update_lighting() -> void:
-	if not GameState.player:
-		return
-	var depth: float = GameState.player.global_position.y / float(TILE_SIZE)
-	# Surface (depth < 0): full brightness
-	# Shallow (0-80): gradual dimming to 70%
-	# Mid (80-200): dim to 40%
-	# Deep (200+): very dark, 20%
-	var brightness: float
-	if depth < 0.0:
-		brightness = 1.0
-	elif depth < 80.0:
-		brightness = lerpf(1.0, 0.7, depth / 80.0)
-	elif depth < 200.0:
-		brightness = lerpf(0.7, 0.4, (depth - 80.0) / 120.0)
+## Get ambient light level for a given world tile Y coordinate.
+## Same depth breakpoints as the old CanvasModulate system but per-tile.
+func _get_ambient_for_depth(wy: int) -> float:
+	if wy < 0:
+		return 1.0
+	elif wy < 80:
+		return lerpf(1.0, 0.7, float(wy) / 80.0)
+	elif wy < 200:
+		return lerpf(0.7, 0.4, float(wy - 80) / 120.0)
+	elif wy < 400:
+		return lerpf(0.4, 0.15, float(wy - 200) / 200.0)
 	else:
-		brightness = lerpf(0.4, 0.2, clampf((depth - 200.0) / 200.0, 0.0, 1.0))
+		return lerpf(0.15, AMBIENT_FLOOR, clampf(float(wy - 400) / 400.0, 0.0, 1.0))
 
-	canvas_modulate.color = Color(brightness, brightness, brightness)
+
+## Euclidean distance between two tile positions.
+func _tile_distance(x1: int, y1: int, x2: int, y2: int) -> float:
+	var dx: float = float(x1 - x2)
+	var dy: float = float(y1 - y2)
+	return sqrt(dx * dx + dy * dy)
+
+
+## Calculate the final light level for a tile, combining ambient and torch light.
+func _calculate_tile_light(wx: int, wy: int, nearby_torches: Array) -> float:
+	var ambient: float = _get_ambient_for_depth(wy)
+	var best_torch: float = 0.0
+	for torch_pos in nearby_torches:
+		var dist: float = _tile_distance(wx, wy, torch_pos.x, torch_pos.y)
+		if dist < TORCH_RADIUS:
+			var t: float = dist / float(TORCH_RADIUS)
+			var contribution: float = TORCH_LIGHT_LEVEL * (1.0 - pow(t, TORCH_FALLOFF_POWER))
+			if contribution > best_torch:
+				best_torch = contribution
+	return maxf(ambient, best_torch)
+
+
+## Gather torch positions from a chunk and its 8 neighbors that could bleed
+## light into this chunk (within TORCH_RADIUS of the chunk boundary).
+func _gather_torches_for_chunk(chunk_coord: Vector2i) -> Array:
+	var result: Array = []
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			var neighbor := Vector2i(chunk_coord.x + dx, chunk_coord.y + dy)
+			var torch_list: Array = world_data.get_chunk_torches(neighbor)
+			if dx == 0 and dy == 0:
+				# Same chunk: include all torches
+				result.append_array(torch_list)
+			else:
+				# Neighbor chunk: only include torches close enough to bleed in
+				var origin: Vector2i = WorldData.chunk_to_world(chunk_coord)
+				for tpos in torch_list:
+					# Check if torch is within TORCH_RADIUS of any edge of our chunk
+					var closest_x: int = clampi(tpos.x, origin.x, origin.x + CHUNK_SIZE - 1)
+					var closest_y: int = clampi(tpos.y, origin.y, origin.y + CHUNK_SIZE - 1)
+					if _tile_distance(tpos.x, tpos.y, closest_x, closest_y) < TORCH_RADIUS:
+						result.append(tpos)
+	return result
+
+
+## Find which loaded chunks could be affected by a torch at the given position.
+func _get_affected_chunks(torch_pos: Vector2i) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	# Check all positions within TORCH_RADIUS to find unique chunks
+	var min_chunk := WorldData.world_to_chunk(Vector2i(torch_pos.x - TORCH_RADIUS, torch_pos.y - TORCH_RADIUS))
+	var max_chunk := WorldData.world_to_chunk(Vector2i(torch_pos.x + TORCH_RADIUS, torch_pos.y + TORCH_RADIUS))
+	for cx in range(min_chunk.x, max_chunk.x + 1):
+		for cy in range(min_chunk.y, max_chunk.y + 1):
+			var cc := Vector2i(cx, cy)
+			if active_chunks.has(cc):
+				result.append(cc)
+	return result
+
+
+## Create a darkness overlay Sprite2D for a chunk. Each pixel in the 32x32
+## image represents one tile; the sprite is scaled up to TILE_SIZE.
+func _create_darkness_overlay(chunk_coord: Vector2i) -> void:
+	var img := Image.create(CHUNK_SIZE, CHUNK_SIZE, false, Image.FORMAT_RGBA8)
+	_update_darkness_image(chunk_coord, img)
+
+	var tex := ImageTexture.create_from_image(img)
+	var sprite := Sprite2D.new()
+	sprite.texture = tex
+	sprite.centered = false
+	sprite.z_index = DARKNESS_Z_INDEX
+	sprite.scale = Vector2(TILE_SIZE, TILE_SIZE)
+	sprite.position = Vector2(
+		chunk_coord.x * PIXEL_CHUNK_SIZE,
+		chunk_coord.y * PIXEL_CHUNK_SIZE
+	)
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	add_child(sprite)
+	chunk_darkness_sprites[chunk_coord] = sprite
+
+
+## Fill a 32x32 image with darkness alpha values based on per-tile lighting.
+func _update_darkness_image(chunk_coord: Vector2i, img: Image) -> void:
+	var origin: Vector2i = WorldData.chunk_to_world(chunk_coord)
+	var nearby_torches: Array = _gather_torches_for_chunk(chunk_coord)
+	for x in range(CHUNK_SIZE):
+		for y in range(CHUNK_SIZE):
+			var wx: int = origin.x + x
+			var wy: int = origin.y + y
+			var light: float = _calculate_tile_light(wx, wy, nearby_torches)
+			var darkness: float = 1.0 - clampf(light, 0.0, 1.0)
+			img.set_pixel(x, y, Color(0.0, 0.0, 0.0, darkness))
+
+
+## Update the darkness overlay for an already-loaded chunk.
+func _update_chunk_lighting(chunk_coord: Vector2i) -> void:
+	if not chunk_darkness_sprites.has(chunk_coord):
+		return
+	var sprite: Sprite2D = chunk_darkness_sprites[chunk_coord]
+	var tex: ImageTexture = sprite.texture as ImageTexture
+	var img: Image = tex.get_image()
+	_update_darkness_image(chunk_coord, img)
+	tex.update(img)
+
+
+## Recalculate lighting for all loaded chunks affected by a torch change.
+func _recalculate_lighting_around(world_pos: Vector2i) -> void:
+	var affected: Array[Vector2i] = _get_affected_chunks(world_pos)
+	for cc in affected:
+		_update_chunk_lighting(cc)
 
 
 # --- Depth tracking ---
@@ -514,6 +630,7 @@ func _spawn_torch(world_pos: Vector2i) -> void:
 		world_pos.x * TILE_SIZE + TILE_SIZE / 2.0,
 		world_pos.y * TILE_SIZE + TILE_SIZE / 2.0
 	)
+	torch.z_index = TORCH_SPRITE_Z_INDEX
 	add_child(torch)
 	active_torches[world_pos] = torch
 
@@ -528,11 +645,13 @@ func _remove_torch(world_pos: Vector2i) -> void:
 ## Called when GameServer confirms a torch was placed.
 func _on_torch_placed(world_pos: Vector2i) -> void:
 	_spawn_torch(world_pos)
+	_recalculate_lighting_around(world_pos)
 
 
 ## Called when GameServer confirms a torch was removed.
 func _on_torch_removed(world_pos: Vector2i) -> void:
 	_remove_torch(world_pos)
+	_recalculate_lighting_around(world_pos)
 
 
 # --- Utility ---
