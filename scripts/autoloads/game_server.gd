@@ -1,7 +1,7 @@
 ## GameServer - The authority for all game state changes.
 ##
 ## Every game action flows through this autoload. In single-player, the local
-## game IS the server — but the code treats it that way. This means:
+## game IS the server -- but the code treats it that way. This means:
 ## - Game logic lives here, not in player or UI scripts.
 ## - State changes go through GameServer methods.
 ## - The player controller emits input events; it does NOT directly modify world state.
@@ -14,7 +14,7 @@ extends Node
 
 # --- Signals ---
 # These signals are emitted AFTER the server validates and applies a state change.
-# Other systems (BehaviorTracker, UI, etc.) listen to these — they never call
+# Other systems (BehaviorTracker, UI, etc.) listen to these -- they never call
 # GameServer methods themselves to read state.
 
 ## Emitted when a tile is successfully mined.
@@ -32,26 +32,104 @@ signal damage_dealt(source: Node, target: Node, amount: float, damage_type: Stri
 ## Emitted when an entity is killed.
 signal entity_killed(source: Node, target: Node, weapon: String)
 
+# --- World data ---
+
+## Reference to the authoritative world data. Set by the world scene via initialize_world().
+var world_data: WorldData = null
+
+## Maximum distance (in pixels) a player can be from a tile to interact with it.
+const INTERACTION_RANGE: float = 48.0  # 3 tiles * 16 pixels
+
+## Tile size in pixels — must match the TileSet and WorldData coordinate system.
+const TILE_SIZE: int = 16
+
 
 func _ready() -> void:
-	print("[GameServer] Initialized — acting as local authority.")
+	print("[GameServer] Initialized -- acting as local authority.")
 
 
-## Request to mine a tile at the given world position.
-## In single-player this validates immediately and applies.
-## In multiplayer this would be an RPC to the host.
-func request_mine(player: Node, world_pos: Vector2i) -> void:
-	print("[GameServer] request_mine from %s at %s — stub, no world data yet." % [player.name, str(world_pos)])
+## Called by the world scene to register the authoritative world data.
+func initialize_world(data: WorldData) -> void:
+	world_data = data
+	print("[GameServer] World data registered with %d tiles." % data.tiles.size())
 
 
-## Request to place a tile at the given world position.
-func request_place(player: Node, world_pos: Vector2i, tile_type: int) -> void:
-	print("[GameServer] request_place from %s at %s, type %d — stub." % [player.name, str(world_pos), tile_type])
+## Request to mine a tile at the given world tile position.
+## Returns true if the mine was successful, false if validation failed.
+func request_mine(player: Node, world_pos: Vector2i, tool_power: float) -> bool:
+	if world_data == null:
+		print("[GameServer] request_mine failed: no world data.")
+		return false
+
+	# Validate: tile exists and is not EMPTY.
+	var tile_type: int = world_data.get_tile(world_pos)
+	if tile_type == TileDatabase.TileType.EMPTY:
+		return false
+
+	# Validate: player is close enough.
+	var tile_center := Vector2(world_pos.x * TILE_SIZE + TILE_SIZE / 2.0, world_pos.y * TILE_SIZE + TILE_SIZE / 2.0)
+	var player_pos := (player as Node2D).global_position
+	var distance := player_pos.distance_to(tile_center)
+	if distance > INTERACTION_RANGE:
+		return false
+
+	# Valid mine -- remove tile from world data.
+	world_data.remove_tile(world_pos)
+
+	# Emit signal so the world scene can update visuals and spawn drops.
+	tile_mined.emit(world_pos, tile_type, "hand")  # tool_used is "hand" for now
+
+	print("[GameServer] Tile mined at %s (type %d, power %.1f)" % [str(world_pos), tile_type, tool_power])
+	return true
+
+
+## Request to place a tile at the given world tile position.
+## Returns true if placement was successful, false if validation failed.
+func request_place(player: Node, world_pos: Vector2i, tile_type: int) -> bool:
+	if world_data == null:
+		print("[GameServer] request_place failed: no world data.")
+		return false
+
+	# Validate: position must be empty.
+	if world_data.has_tile(world_pos):
+		return false
+
+	# Validate: tile type must be valid (not EMPTY).
+	if tile_type == TileDatabase.TileType.EMPTY:
+		return false
+
+	# Validate: player is close enough.
+	var tile_center := Vector2(world_pos.x * TILE_SIZE + TILE_SIZE / 2.0, world_pos.y * TILE_SIZE + TILE_SIZE / 2.0)
+	var player_pos := (player as Node2D).global_position
+	var distance := player_pos.distance_to(tile_center)
+	if distance > INTERACTION_RANGE:
+		return false
+
+	# Valid place -- set tile in world data.
+	world_data.set_tile(world_pos, tile_type)
+
+	# Emit signal so the world scene can update visuals.
+	tile_placed.emit(world_pos, tile_type)
+
+	print("[GameServer] Tile placed at %s (type %d)" % [str(world_pos), tile_type])
+	return true
+
+
+## Request to collect an item and add it to the player's inventory.
+func request_collect_item(player: Node, item_type: String, amount: int) -> void:
+	# Add to player's inventory if the player has the add_item method.
+	if player.has_method("add_item"):
+		player.add_item(item_type, amount)
+
+	# Emit signal for BehaviorTracker and other listeners.
+	item_collected.emit(item_type, amount)
+
+	print("[GameServer] Item collected: %s x%d by %s" % [item_type, amount, player.name])
 
 
 ## Apply damage from source to target. This is the ONLY way damage happens.
 func deal_damage(source: Node, target: Node, amount: float, damage_type: String = "physical", weapon: String = "") -> void:
-	print("[GameServer] deal_damage: %s -> %s for %.1f %s damage (weapon: %s) — stub." % [
+	print("[GameServer] deal_damage: %s -> %s for %.1f %s damage (weapon: %s) -- stub." % [
 		source.name if source else "null",
 		target.name if target else "null",
 		amount,

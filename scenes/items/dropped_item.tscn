@@ -1,0 +1,30 @@
+[gd_scene load_steps=5 format=3 uid="uid://d0dropitem001"]
+
+[ext_resource type="Script" path="res://scenes/items/dropped_item.gd" id="1_dropped"]
+[ext_resource type="Texture2D" path="res://assets/items/item_sprite.png" id="2_sprite"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 4.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_pickup"]
+radius = 16.0
+
+[node name="DroppedItem" type="CharacterBody2D"]
+collision_layer = 8
+collision_mask = 1
+script = ExtResource("1_dropped")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_sprite")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_body")
+
+[node name="PickupArea" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 2
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PickupArea"]
+shape = SubResource("CircleShape2D_pickup")
+
+[connection signal="body_entered" from="PickupArea" to="." method="_on_pickup_area_body_entered"]

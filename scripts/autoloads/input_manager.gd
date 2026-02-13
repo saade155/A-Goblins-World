@@ -20,13 +20,19 @@ signal jump_pressed
 ## Emitted the frame jump is released.
 signal jump_released
 
+## Emitted when the hotbar selection changes.
+signal hotbar_changed(slot: int)
+
 
 ## Track previous jump state to detect edges for signals.
 var _jump_held_last_frame: bool = false
 
+## Currently selected hotbar slot (0-4). -1 means nothing selected.
+var _selected_hotbar: int = 0
+
 
 func _ready() -> void:
-	print("[InputManager] Initialized — reading from local input.")
+	print("[InputManager] Initialized -- reading from local input.")
 
 
 func _process(_delta: float) -> void:
@@ -40,6 +46,15 @@ func _process(_delta: float) -> void:
 
 	_jump_held_last_frame = jump_held
 
+	# Check hotbar number keys (1-5 map to slots 0-4).
+	for i in range(5):
+		var action_name := "hotbar_%d" % (i + 1)
+		if Input.is_action_just_pressed(action_name):
+			_selected_hotbar = i
+			hotbar_changed.emit(i)
+
+
+# --- Movement input ---
 
 ## Returns the horizontal movement direction as a float.
 ## -1.0 = full left, 0.0 = no input, 1.0 = full right.
@@ -61,3 +76,25 @@ func is_jump_just_pressed() -> bool:
 ## Returns true only on the frame the jump action was released.
 func is_jump_just_released() -> bool:
 	return Input.is_action_just_released("jump")
+
+
+# --- Mining / placement input ---
+
+## Returns true if the mine action (left mouse) is currently held down.
+func is_mine_pressed() -> bool:
+	return Input.is_action_pressed("mine")
+
+
+## Returns true only on the frame the mine action was first pressed.
+func is_mine_just_pressed() -> bool:
+	return Input.is_action_just_pressed("mine")
+
+
+## Returns true only on the frame the place action (right mouse) was first pressed.
+func is_place_just_pressed() -> bool:
+	return Input.is_action_just_pressed("place")
+
+
+## Returns the currently selected hotbar slot index (0-4).
+func get_selected_hotbar() -> int:
+	return _selected_hotbar

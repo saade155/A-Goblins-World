@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3 uid="uid://d0minecomp001"]
+
+[ext_resource type="Script" path="res://scenes/player/mining_component.gd" id="1_mining"]
+[ext_resource type="Texture2D" path="res://assets/tilesets/tile_highlight.png" id="2_highlight"]
+
+[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_1"]
+size = Vector2(16, 16)
+
+[node name="MiningComponent" type="Node2D"]
+top_level = true
+script = ExtResource("1_mining")
+
+[node name="TileHighlight" type="Sprite2D" parent="."]
+self_modulate = Color(1, 1, 0.3, 0.3)
+texture = ExtResource("2_highlight")
+
+[node name="ProgressIndicator" type="Sprite2D" parent="."]
+self_modulate = Color(1, 1, 1, 0)
+texture = SubResource("PlaceholderTexture2D_1")
