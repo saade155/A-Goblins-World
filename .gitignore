@@ -1,0 +1,18 @@
+# Godot 4.x
+.godot/
+
+# Export
+export.cfg
+export_presets.cfg
+*.translation
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~

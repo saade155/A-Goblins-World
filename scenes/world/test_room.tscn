@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://d0testroom001"]
+
+[ext_resource type="Script" path="res://scenes/world/test_room.gd" id="1_test_room"]
+
+[node name="TestRoom" type="TileMapLayer"]
+collision_layer = 1
+collision_mask = 0
+script = ExtResource("1_test_room")
