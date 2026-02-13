@@ -34,6 +34,9 @@ var recent_actions: Array[Dictionary] = []
 ## Stat values (non-counter data like max_depth_reached).
 var stats: Dictionary = {}
 
+## Ore tile types for tracking first discoveries.
+const ORE_TYPES: Array[int] = [3, 5, 6, 7, 18, 19]  # IRON_ORE, COPPER_ORE, GOLD_ORE, CRYSTAL, RUBY_ORE, EMERALD_ORE
+
 
 func _ready() -> void:
 	print("[BehaviorTracker] Initialized — recording all player actions.")
@@ -116,6 +119,21 @@ func _on_tile_mined(position: Vector2i, tile_type: int, tool_used: String) -> vo
 		"position_x": position.x,
 		"position_y": position.y,
 	})
+
+	# Track ore types encountered (first discovery)
+	if tile_type in ORE_TYPES:
+		_record_ore_encountered(tile_type)
+
+
+## Record the first time a player mines a specific ore type.
+func _record_ore_encountered(tile_type: int) -> void:
+	var encountered: Dictionary = stats.get("ore_types_encountered", {})
+	if not encountered.has(tile_type):
+		encountered[tile_type] = Time.get_ticks_msec() / 1000.0
+		stats["ore_types_encountered"] = encountered
+		var props: Dictionary = TileDatabase.tile_properties.get(tile_type, {})
+		var ore_name: String = props.get("name", "Unknown")
+		print("[BehaviorTracker] New ore discovered: %s" % ore_name)
 
 
 func _on_tile_placed(position: Vector2i, tile_type: int) -> void:

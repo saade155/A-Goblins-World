@@ -98,3 +98,20 @@ func is_place_just_pressed() -> bool:
 ## Returns the currently selected hotbar slot index (0-4).
 func get_selected_hotbar() -> int:
 	return _selected_hotbar
+
+
+# --- UI input ---
+
+## Returns true only on the frame the map toggle key was pressed.
+func is_map_toggle_just_pressed() -> bool:
+	return Input.is_action_just_pressed("toggle_map")
+
+
+## Returns true only on the frame the debug fog toggle key was pressed.
+func is_debug_fog_toggle_just_pressed() -> bool:
+	return Input.is_action_just_pressed("toggle_debug_fog")
+
+
+## Returns true only on the frame the place torch key was pressed.
+func is_place_torch_just_pressed() -> bool:
+	return Input.is_action_just_pressed("place_torch")

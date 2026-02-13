@@ -5,8 +5,11 @@
 ## requests to GameServer when mining completes or placement is triggered.
 ##
 ## Authority flow: MiningComponent -> GameServer.request_mine() -> GameServer
-## modifies WorldData -> GameServer emits signal -> TestRoom updates TileMapLayer.
+## modifies WorldData -> GameServer emits signal -> ChunkManager updates TileMapLayer.
 ## This component NEVER directly modifies WorldData or the TileMapLayer.
+##
+## No direct TileMapLayer reference needed. Tile coordinates are calculated from
+## mouse world position, and tile existence is checked via GameState.world_data.
 
 extends Node2D
 
@@ -24,9 +27,6 @@ var mine_progress: float = 0.0
 
 ## The hardness of the currently targeted tile (how much progress needed to break it).
 var target_hardness: float = 0.0
-
-## Reference to the TileMapLayer, set externally by the world scene.
-var tile_map_layer: TileMapLayer = null
 
 ## Hotbar slot-to-tile mapping for placement. Slot index -> TileType.
 var _hotbar_tiles: Array[int] = [
@@ -54,16 +54,17 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if tile_map_layer == null:
+	# Need world data to check tiles. Wait until it's available.
+	if not GameServer.world_data:
 		return
 
 	# Get mouse position in world space.
 	var mouse_world_pos := get_global_mouse_position()
 
-	# Convert to tile coordinates (integer floor division).
+	# Convert to tile coordinates using floor division.
 	var tile_coord := Vector2i(
-		floori(mouse_world_pos.x / TILE_SIZE),
-		floori(mouse_world_pos.y / TILE_SIZE)
+		floori(mouse_world_pos.x / float(TILE_SIZE)),
+		floori(mouse_world_pos.y / float(TILE_SIZE))
 	)
 
 	# Calculate the center of this tile in world space.
@@ -82,7 +83,7 @@ func _process(delta: float) -> void:
 		_highlight.global_position = tile_world_center
 		_highlight.visible = true
 		# Tint based on whether there's a tile there.
-		if GameServer.world_data and GameServer.world_data.has_tile(tile_coord):
+		if GameServer.world_data.has_tile(tile_coord):
 			_highlight.self_modulate = Color(1.0, 1.0, 0.3, 0.3)  # Yellow for minable
 		else:
 			_highlight.self_modulate = Color(0.3, 1.0, 0.3, 0.2)  # Green for placeable
@@ -92,7 +93,7 @@ func _process(delta: float) -> void:
 	# --- Mining logic ---
 	if in_range and InputManager.is_mine_pressed():
 		# Check if we have a valid target tile to mine.
-		if GameServer.world_data and GameServer.world_data.has_tile(tile_coord):
+		if GameServer.world_data.has_tile(tile_coord):
 			if tile_coord != current_target:
 				# Target changed -- reset progress.
 				current_target = tile_coord
@@ -117,6 +118,9 @@ func _process(delta: float) -> void:
 					_reset_mining()
 		else:
 			# No tile to mine at this position.
+			# Check for torch removal before resetting.
+			if GameServer.world_data.has_torch(tile_coord):
+				GameServer.request_remove_torch(get_parent(), tile_coord)
 			_reset_mining()
 	else:
 		# Mine button not held or out of range -- reset.
@@ -131,6 +135,11 @@ func _process(delta: float) -> void:
 				var tile_type: int = _hotbar_tiles[hotbar_slot]
 				if tile_type != TileDatabase.TileType.EMPTY:
 					GameServer.request_place(get_parent(), tile_coord, tile_type)
+
+	# --- Torch placement (T key) ---
+	if in_range and InputManager.is_place_torch_just_pressed():
+		if GameServer.world_data and not GameServer.world_data.has_tile(tile_coord):
+			GameServer.request_place_torch(get_parent(), tile_coord)
 
 
 ## Reset all mining state and hide the progress indicator.

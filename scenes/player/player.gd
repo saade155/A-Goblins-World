@@ -58,6 +58,12 @@ var _is_jumping: bool = false
 ## Tracks whether we were on the floor last frame (for coyote time edge detection).
 var _was_on_floor: bool = false
 
+## Last known position for distance tracking.
+var _last_position: Vector2 = Vector2.ZERO
+
+## Whether we've initialized the last position yet.
+var _distance_initialized: bool = false
+
 ## Cached reference to the Sprite2D for flipping.
 @onready var _sprite: Sprite2D = $Sprite2D
 
@@ -77,6 +83,11 @@ func _ready() -> void:
 	# Register with GameState so other systems can find the player.
 	GameState.register_player(self)
 
+	# Snap camera to player immediately (no smooth slide from origin on load)
+	var camera := $Camera2D as Camera2D
+	if camera:
+		camera.reset_smoothing()
+
 	# Listen for hotbar changes from InputManager.
 	InputManager.hotbar_changed.connect(_on_hotbar_changed)
 
@@ -93,6 +104,8 @@ func _physics_process(delta: float) -> void:
 
 	# Track floor state for next frame's coyote time calculation.
 	_was_on_floor = is_on_floor()
+
+	_track_movement_distance()
 
 
 # --- Movement ---
@@ -167,6 +180,21 @@ func _apply_variable_jump_gravity(delta: float) -> void:
 		velocity.y += GRAVITY * VARIABLE_JUMP_MULTIPLIER * delta
 		# Re-cap in case this pushed us past terminal velocity.
 		velocity.y = minf(velocity.y, MAX_FALL_SPEED)
+
+
+## Track cumulative movement distance for BehaviorTracker.
+func _track_movement_distance() -> void:
+	if not _distance_initialized:
+		_last_position = global_position
+		_distance_initialized = true
+		return
+	var dist: float = global_position.distance_to(_last_position)
+	if dist > 0.5:  # Ignore micro-jitter
+		var current = BehaviorTracker.get_stat("movement_distance")
+		if current == null:
+			current = 0.0
+		BehaviorTracker.set_stat("movement_distance", float(current) + dist)
+	_last_position = global_position
 
 
 # --- Inventory ---

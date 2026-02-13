@@ -32,6 +32,12 @@ signal damage_dealt(source: Node, target: Node, amount: float, damage_type: Stri
 ## Emitted when an entity is killed.
 signal entity_killed(source: Node, target: Node, weapon: String)
 
+## Emitted when a torch is placed.
+signal torch_placed(position: Vector2i)
+
+## Emitted when a torch is removed.
+signal torch_removed(position: Vector2i)
+
 # --- World data ---
 
 ## Reference to the authoritative world data. Set by the world scene via initialize_world().
@@ -105,6 +111,11 @@ func request_place(player: Node, world_pos: Vector2i, tile_type: int) -> bool:
 	if distance > INTERACTION_RANGE:
 		return false
 
+	# Remove any torch at this position (can't have torch and tile at same spot)
+	if world_data.has_torch(world_pos):
+		world_data.remove_torch(world_pos)
+		torch_removed.emit(world_pos)
+
 	# Valid place -- set tile in world data.
 	world_data.set_tile(world_pos, tile_type)
 
@@ -136,3 +147,40 @@ func deal_damage(source: Node, target: Node, amount: float, damage_type: String 
 		damage_type,
 		weapon
 	])
+
+
+## Request to place a torch at a world tile position.
+## Returns true if placement was successful.
+func request_place_torch(player: Node, world_pos: Vector2i) -> bool:
+	if world_data == null:
+		return false
+	# Cannot place torch on a solid tile
+	if world_data.has_tile(world_pos):
+		return false
+	# Cannot place torch where one already exists
+	if world_data.has_torch(world_pos):
+		return false
+	# Validate: player is close enough
+	var tile_center := Vector2(world_pos.x * TILE_SIZE + TILE_SIZE / 2.0, world_pos.y * TILE_SIZE + TILE_SIZE / 2.0)
+	var player_pos := (player as Node2D).global_position
+	if player_pos.distance_to(tile_center) > INTERACTION_RANGE:
+		return false
+	world_data.add_torch(world_pos)
+	torch_placed.emit(world_pos)
+	return true
+
+
+## Request to remove a torch at a world tile position.
+## Returns true if removal was successful.
+func request_remove_torch(player: Node, world_pos: Vector2i) -> bool:
+	if world_data == null:
+		return false
+	if not world_data.has_torch(world_pos):
+		return false
+	var tile_center := Vector2(world_pos.x * TILE_SIZE + TILE_SIZE / 2.0, world_pos.y * TILE_SIZE + TILE_SIZE / 2.0)
+	var player_pos := (player as Node2D).global_position
+	if player_pos.distance_to(tile_center) > INTERACTION_RANGE:
+		return false
+	world_data.remove_torch(world_pos)
+	torch_removed.emit(world_pos)
+	return true
