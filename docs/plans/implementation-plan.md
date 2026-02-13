@@ -245,76 +245,63 @@ World generates seamlessly in any direction. No pop-in, no frame drops. Modified
 
 ---
 
-## Milestone 4: Inventory and Station-Based Crafting
+## Milestone 4: Inventory, Crafting, and Menus (NEXT)
 
-**Goal:** Full inventory system with station-based crafting. Hand-crafting for survival basics only. Crafting stations as the primary gate. Basic quality system foundation.
+**Goal:** Full inventory system with station-based crafting, quality foundation, and complete menu infrastructure (title screen, pause menu, settings, save slots).
 
-### What Gets Built
+### Sub-phases
 
-**Inventory system:**
-- Fixed slots (30 + 10 hotbar), item stacking, split/swap, pure data on authority side
-- Inventory state lives on GameServer, UI reads from it
+#### 4A: Item Database + Inventory Data Layer
+- **Item database (autoload):** Static registry loaded from data files. Items have: id, name, icon, max_stack, type (material/tool/weapon/placeable/consumable), metadata. Tools add: tool_quality (enum: Crude/Standard/Fine/Masterwork/Legendary/Ancient), mining_power, crafting_bonus
+- **Inventory system:** Fixed slots (30 + 10 hotbar), item stacking, split/swap. State lives on GameServer, UI reads from it
 
-**Item database (autoload):**
-- Static registry loaded from data files (JSON/Resource)
-- Items have: id, name, icon, max_stack, type (material/tool/weapon/placeable/consumable), metadata
-- Tools have additional: `tool_quality` (enum: Crude/Standard/Fine/Masterwork/Legendary/Ancient), `mining_power`, `crafting_bonus`
+#### 4B: Menus + Save Slots
+- **Title screen:** New Game / Load Game / Settings / Quit
+- **Pause menu (Escape):** Resume / Settings / Save & Quit / Quit to Title
+- **Settings menu:** Audio (master/sfx/music volume), Video (fullscreen, resolution), Controls (keybinding display, remapping deferred to later)
+- **Save slot system:** Multiple worlds instead of hardcoded `user://worlds/default/`. SaveManager parameterized by world slot. World metadata: name, playtime, last played date, thumbnail (stretch)
+- **Load screen:** Show existing saves with metadata, delete save option
 
-**Station-based crafting:**
-- **Hand-crafting:** Limited to survival basics - torches, crude bandages, campfires, rope, crude stone tools. Available anywhere, no station needed
+#### 4C: Game HUD + Inventory UI
+- **HUD:** Hotbar with selected slot highlight, health bar
+- **Inventory grid:** Drag/drop, split/swap, right-click actions
+- **Crafting panel:** Available recipes filtered by nearby station
+- **Tooltip system:** Item name, quality, stats, description
+
+#### 4D: Crafting System + Stations + Recipes
+- **Hand-crafting:** Limited to survival basics — torches, crude bandages, campfires, rope, crude stone tools. Available anywhere, no station needed. Always produces Crude quality
+- **Station-based crafting:** Stations are interactive world scenes — walk up, press interact, filtered recipe UI opens. Always produces Standard quality
 - **Stations gate recipe categories:**
   - Workbench: basic items, furniture, building components
   - Furnace: smelting ores into bars
   - Anvil: weapons, armor, tools
-  - (Alchemy table, engineering bench planned for later milestones)
-- **Station progression chain:** Higher-tier stations require materials and lower-tier stations to build. Anvil needs smelted iron (furnace) which needs a workbench to build
-- Stations are interactive world scenes - walk up, press interact, filtered recipe UI opens
-- Recipe database with station requirements. Authority validates ingredients before crafting
+- **Station progression chain:** Workbench → Furnace (needs workbench to build) → Anvil (needs smelted iron from furnace)
+- **Recipe database** with station requirements. Authority validates ingredients before crafting
 
-**Basic quality system (foundation):**
-- Quality enum defined: Crude, Standard, Fine, Masterwork, Legendary, Ancient
-- For now, all player-crafted items produce Standard quality (the weighted roll system comes in Milestone 9 when skills exist to influence it)
-- Item data structure includes quality field from day one
-- Quality affects displayed stats (multipliers per tier defined in data)
-- Hand-crafted items are always Crude quality - this is intentional, pushing players toward stations
-
-**UI layer:**
-- HUD with hotbar and health bar
-- Inventory grid with drag/drop
-- Crafting panel showing available recipes (filtered by nearby station)
-- Tooltip system showing item quality, stats, description
-
-**Tool progression:**
-- Wood -> Stone -> Iron -> Gold pickaxes
-- Each tier mines faster and mines harder blocks
-- All tools crafted at Standard quality for now (quality variation comes with skill system)
-
-**Initial recipes:**
-- Hand-craft: torches, campfire, crude stone pickaxe, crude bandage
-- Workbench: wooden tools, furniture, furnace components
-- Furnace: ore -> bars (copper, iron, gold)
-- Anvil: metal tools, weapons, armor
-
-**BehaviorTracker additions:**
-- Track `items_crafted` by type and station used
-- Track `stations_built` by type
-- Track `stations_used` by type (each interaction)
-- Track `items_consumed` (bandages used, food eaten)
-
-### What the Player Can Do
-Mine resources, hand-craft torches and a crude pickaxe. Build a workbench, then a furnace, then an anvil. Smelt ores. Craft better pickaxes at the anvil. Mine harder materials. The progression chain works: mine -> collect -> build station -> craft at station -> go deeper. Hand-crafted items are noticeably worse than station-crafted ones.
+#### 4E: Tool Progression + Quality + BehaviorTracker
+- **Tool progression:** Wood → Stone → Iron → Gold pickaxes. Each tier mines faster and mines harder blocks
+- **Quality foundation:** Enum: Crude/Standard/Fine/Masterwork/Legendary/Ancient. Quality field on every item from day one. Quality affects displayed stats (multipliers per tier defined in data). Weighted roll system deferred to M9
+- **Initial recipes:**
+  - Hand-craft: torches, campfire, crude stone pickaxe, crude bandage
+  - Workbench: wooden tools, furniture, furnace components
+  - Furnace: ore → bars (copper, iron, gold)
+  - Anvil: metal tools, weapons, armor
+- **BehaviorTracker additions:** items_crafted (by type and station), stations_built (by type), stations_used (by type), items_consumed
 
 ### Key Technical Decisions
-- **Item database as data files** - easy to add items without code changes
-- **Crafting stations as interactive world scenes** - walk up, press interact, filtered recipe UI opens
-- **UI with Control nodes** - `GridContainer` of `TextureRect` buttons for inventory
-- **Inventory on authority side** - UI sends requests, reacts to confirmed changes
-- **Quality field on every item from day one** - even though most items are Standard, the data structure is ready
-- **Hand-crafting = Crude, station-crafting = Standard** - immediately communicates that stations matter
-- **Station quality not yet implemented** - stations work as binary (have it or don't) until Milestone 9
+- Item database as data files — easy to add items without code changes
+- Inventory on authority side — UI sends requests, reacts to confirmed changes
+- Quality field on every item from day one — data structure ready for M9
+- Hand-crafting = Crude, station-crafting = Standard — immediately communicates that stations matter
+- Menus use CanvasLayer with Control nodes — independent of game world rendering
+- Save slots parameterize SaveManager — minimal refactor of existing persistence
 
-### Acceptance Test
-Complete cycle: mine -> hand-craft crude stone pickaxe -> build workbench -> craft furnace -> smelt iron -> build anvil -> craft iron pickaxe at anvil. Hand-crafted crude pickaxe is visibly worse than anvil-crafted one. UI is functional. Stacking and edge cases work. Crafting only works at correct stations. `BehaviorTracker.get_count("items_crafted")` is accurate.
+### Acceptance Tests
+1. **Inventory:** Pick up items, stack, split, swap, drop. Edge cases (full inventory, max stack) handled
+2. **Crafting loop:** Mine → hand-craft crude stone pickaxe → build workbench → craft furnace → smelt iron → build anvil → craft iron pickaxe. Crude pickaxe visibly worse than anvil-crafted
+3. **Menus:** Title screen → New Game starts fresh world. Escape pauses. Settings persist. Save & Quit → Load Game restores state
+4. **Save slots:** Create multiple worlds, load each independently, delete a save
+5. **BehaviorTracker:** `get_count("items_crafted")` is accurate
 
 ---
 
@@ -815,7 +802,6 @@ This is why we built client-server from day one. GameServer becomes the network 
 
 ### What Gets Built
 
-- **Menus:** Main menu, settings (video/audio/controls), save slots
 - **Sound/Music:** SFX, ambience per biome, music per zone/boss
 - **Particles:** Mining debris, combat hits, environmental effects
 - **Steam integration:** GodotSteam plugin, achievements, cloud saves
