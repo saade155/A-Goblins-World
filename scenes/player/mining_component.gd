@@ -14,10 +14,10 @@
 extends Node2D
 
 ## Maximum interaction distance in pixels (~3 tiles).
-@export var mine_range: float = 48.0
+@export var mine_range: float = 96.0
 
 ## Base mining speed multiplier. Tools will increase this later.
-@export var base_mine_speed: float = 1.0
+@export var base_mine_speed: float = 2.0
 
 ## The tile coordinate currently targeted by the mouse. (-1, -1) = none.
 var current_target: Vector2i = Vector2i(-1, -1)
@@ -44,7 +44,7 @@ var _hotbar_tiles: Array[int] = [
 @onready var _progress_indicator: Sprite2D = $ProgressIndicator
 
 ## Tile size in pixels.
-const TILE_SIZE: int = 16
+const TILE_SIZE: int = 32
 
 
 func _ready() -> void:

@@ -1,6 +1,3 @@
-[gd_scene load_steps=2 format=3 uid="uid://ika245t07mum"]
-
-[ext_resource type="Script" path="res://scenes/world/test_room.gd" id="1_test_room"]
+[gd_scene format=3 uid="uid://ika245t07mum"]
 
 [node name="TestRoom" type="TileMapLayer"]
-script = ExtResource("1_test_room")

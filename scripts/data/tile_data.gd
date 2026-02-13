@@ -233,6 +233,11 @@ func _ready() -> void:
 	print("[TileData] Initialized with %d tile types." % tile_properties.size())
 
 
+## Get all registered tile types (excludes EMPTY). Useful for iteration.
+func get_tile_types() -> Array:
+	return tile_properties.keys()
+
+
 ## Get the full properties dictionary for a tile type. Returns empty dict for EMPTY/unknown.
 func get_properties(tile_type: int) -> Dictionary:
 	return tile_properties.get(tile_type, {})

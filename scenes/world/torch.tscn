@@ -1,7 +1,7 @@
 [gd_scene format=3]
 
 [sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_sprite"]
-size = Vector2(4, 8)
+size = Vector2(8, 16)
 
 [node name="Torch" type="Node2D"]
 

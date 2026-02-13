@@ -20,7 +20,7 @@ var viewport_tiles_y: int = 0
 const EDGE_BUFFER: int = 2
 
 ## Tile size in pixels.
-const TILE_SIZE: int = 16
+const TILE_SIZE: int = 32
 
 ## When true, all tiles are treated as explored (dev tool).
 var debug_fog_disabled: bool = false

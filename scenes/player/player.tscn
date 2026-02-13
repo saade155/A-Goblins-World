@@ -4,11 +4,11 @@
 [ext_resource type="PackedScene" path="res://scenes/player/mining_component.tscn" id="3_mining"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_1"]
-radius = 5.0
-height = 14.0
+radius = 12.0
+height = 44.0
 
 [sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_1"]
-size = Vector2(10, 14)
+size = Vector2(32, 48)
 
 [node name="Player" type="CharacterBody2D"]
 collision_layer = 2

@@ -44,10 +44,10 @@ signal torch_removed(position: Vector2i)
 var world_data: WorldData = null
 
 ## Maximum distance (in pixels) a player can be from a tile to interact with it.
-const INTERACTION_RANGE: float = 48.0  # 3 tiles * 16 pixels
+const INTERACTION_RANGE: float = 96.0  # 3 tiles * 32 pixels
 
 ## Tile size in pixels — must match the TileSet and WorldData coordinate system.
-const TILE_SIZE: int = 16
+const TILE_SIZE: int = 32
 
 
 func _ready() -> void:

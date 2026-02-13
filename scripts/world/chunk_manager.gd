@@ -17,15 +17,15 @@ class_name ChunkManager
 ## Chunk size in tiles (must match WorldData.CHUNK_SIZE).
 const CHUNK_SIZE: int = 32
 
-## Tile size in pixels (must match the TileSet and GameServer.TILE_SIZE).
-const TILE_SIZE: int = 16
+## Tile size in pixels.
+const TILE_SIZE: int = 32
 
 ## How many chunks to load in each direction from the player's chunk.
 ## Total loaded area = (2 * LOAD_RADIUS + 1)^2 chunks.
 const LOAD_RADIUS: int = 3
 
 ## Pixel size of a full chunk (CHUNK_SIZE * TILE_SIZE).
-const PIXEL_CHUNK_SIZE: int = CHUNK_SIZE * TILE_SIZE  # 512
+const PIXEL_CHUNK_SIZE: int = CHUNK_SIZE * TILE_SIZE  # 1024
 
 ## Torch light radius in tiles.
 const TORCH_RADIUS: int = 8
@@ -395,7 +395,7 @@ func _build_tileset() -> TileSet:
 	ts.set_physics_layer_collision_mask(0, 0)
 
 	# Determine how many tile types we have (skip EMPTY)
-	var tile_types: Array = TileDatabase.tile_properties.keys()
+	var tile_types: Array = TileDatabase.get_tile_types()
 	var atlas_width: int = tile_types.size()
 
 	# Create the atlas image programmatically

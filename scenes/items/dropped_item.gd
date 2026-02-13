@@ -18,10 +18,10 @@ var _spawn_pos: Vector2 = Vector2.ZERO
 var _initial_velocity: Vector2 = Vector2.ZERO
 
 ## Gravity applied to the dropped item.
-const GRAVITY: float = 400.0
+const GRAVITY: float = 800.0
 
 ## Maximum fall speed.
-const MAX_FALL_SPEED: float = 300.0
+const MAX_FALL_SPEED: float = 600.0
 
 ## Cached reference to the sprite for setting color.
 @onready var _sprite: Sprite2D = $Sprite2D
@@ -60,8 +60,8 @@ func initialize(type: String, count: int, spawn_pos: Vector2) -> void:
 
 	# Small random upward bounce with slight horizontal spread.
 	_initial_velocity = Vector2(
-		randf_range(-30.0, 30.0),  # Horizontal randomness
-		randf_range(-120.0, -60.0)  # Upward bounce
+		randf_range(-60.0, 60.0),  # Horizontal randomness
+		randf_range(-240.0, -120.0)  # Upward bounce
 	)
 
 

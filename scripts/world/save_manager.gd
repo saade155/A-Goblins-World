@@ -13,7 +13,7 @@ extends RefCounted
 class_name SaveManager
 
 ## File format version for future migration support.
-const SAVE_VERSION: int = 1
+const SAVE_VERSION: int = 2
 
 ## Name of the current world (used in save path).
 var world_name: String = "default"
@@ -107,6 +107,11 @@ func load_world_meta() -> Variant:
 		return null
 	var data: Dictionary = file.get_var()
 	file.close()
+	# Reject saves from older tile-size era (v1 used 16px tiles, v2 uses 32px)
+	var version: int = data.get("version", 1)
+	if version < 2:
+		print("[SaveManager] WARNING: Save version %d is from the 16px tile era. Generating new world." % version)
+		return null
 	return data
 
 

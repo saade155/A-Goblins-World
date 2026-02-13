@@ -43,8 +43,8 @@ func register_player(player_node: CharacterBody2D) -> void:
 		player_node.global_position = saved_player_position
 		print("[GameState] Player restored to saved position: %s" % str(saved_player_position))
 	else:
-		player_node.global_position = Vector2(0, start_depth * 16)
-		print("[GameState] Player registered at start_depth=%d (y=%d)" % [start_depth, start_depth * 16])
+		player_node.global_position = Vector2(0, start_depth * 32)
+		print("[GameState] Player registered at start_depth=%d (y=%d)" % [start_depth, start_depth * 32])
 
 
 ## Unregister the player (e.g., on scene change or cleanup).

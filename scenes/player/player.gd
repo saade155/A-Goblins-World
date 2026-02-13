@@ -16,22 +16,22 @@ extends CharacterBody2D
 # --- Movement tuning (exported for quick iteration in the editor) ---
 
 ## Horizontal movement speed in pixels/sec.
-@export var SPEED: float = 120.0
+@export var SPEED: float = 240.0
 
 ## How quickly the player reaches target speed (pixels/sec^2).
-@export var ACCELERATION: float = 800.0
+@export var ACCELERATION: float = 1600.0
 
 ## How quickly the player stops when no input is held (pixels/sec^2).
-@export var FRICTION: float = 900.0
+@export var FRICTION: float = 1800.0
 
 ## Initial jump impulse (negative = up in Godot 2D).
-@export var JUMP_VELOCITY: float = -250.0
+@export var JUMP_VELOCITY: float = -500.0
 
 ## Downward acceleration in pixels/sec^2.
-@export var GRAVITY: float = 700.0
+@export var GRAVITY: float = 1400.0
 
 ## Terminal velocity -- max downward speed.
-@export var MAX_FALL_SPEED: float = 400.0
+@export var MAX_FALL_SPEED: float = 800.0
 
 ## Seconds after leaving a ledge during which a jump is still allowed.
 @export var COYOTE_TIME: float = 0.1

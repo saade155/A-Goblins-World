@@ -4,7 +4,7 @@
 [ext_resource type="Texture2D" path="res://assets/tilesets/tile_highlight.png" id="2_highlight"]
 
 [sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_1"]
-size = Vector2(16, 16)
+size = Vector2(32, 32)
 
 [node name="MiningComponent" type="Node2D"]
 top_level = true
@@ -13,6 +13,7 @@ script = ExtResource("1_mining")
 [node name="TileHighlight" type="Sprite2D" parent="."]
 self_modulate = Color(1, 1, 0.3, 0.3)
 texture = ExtResource("2_highlight")
+scale = Vector2(2, 2)
 
 [node name="ProgressIndicator" type="Sprite2D" parent="."]
 self_modulate = Color(1, 1, 1, 0)

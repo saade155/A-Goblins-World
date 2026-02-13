@@ -131,7 +131,7 @@ func _record_ore_encountered(tile_type: int) -> void:
 	if not encountered.has(tile_type):
 		encountered[tile_type] = Time.get_ticks_msec() / 1000.0
 		stats["ore_types_encountered"] = encountered
-		var props: Dictionary = TileDatabase.tile_properties.get(tile_type, {})
+		var props: Dictionary = TileDatabase.get_properties(tile_type)
 		var ore_name: String = props.get("name", "Unknown")
 		print("[BehaviorTracker] New ore discovered: %s" % ore_name)
 

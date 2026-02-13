@@ -69,8 +69,8 @@ func _ready() -> void:
 	visible = false
 
 	# Build color lookup from TileDatabase
-	for tile_type in TileDatabase.tile_properties:
-		tile_colors[tile_type] = TileDatabase.tile_properties[tile_type]["color"]
+	for tile_type in TileDatabase.get_tile_types():
+		tile_colors[tile_type] = TileDatabase.get_properties(tile_type)["color"]
 
 	# Create the map image and texture
 	map_image = Image.create(MAP_SIZE, MAP_SIZE, false, Image.FORMAT_RGBA8)
@@ -172,8 +172,8 @@ func _render_map() -> void:
 
 	var player_pos: Vector2 = GameState.player.global_position
 	var player_tile := Vector2i(
-		floori(player_pos.x / 16.0),
-		floori(player_pos.y / 16.0)
+		floori(player_pos.x / 32.0),
+		floori(player_pos.y / 32.0)
 	)
 
 	var center_tile: Vector2i = player_tile + map_offset
