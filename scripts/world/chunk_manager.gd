@@ -89,6 +89,9 @@ var _torch_scene: PackedScene
 ## Active torch visual nodes. Key = world tile position, value = Node2D instance.
 var active_torches: Dictionary = {}
 
+## Full-tile collision polygon for tileset tiles.
+var collision_polygon: PackedVector2Array
+
 ## Whether this is the first frame (force-load all chunks synchronously).
 var _first_load: bool = true
 
@@ -98,9 +101,18 @@ signal chunk_loaded(chunk_coord: Vector2i)
 ## Emitted when a chunk is unloaded from the scene.
 signal chunk_unloaded(chunk_coord: Vector2i)
 
+## Emitted once after the first synchronous load completes (all initial chunks ready).
+signal initial_load_complete
+
 
 func _ready() -> void:
 	save_manager = SaveManager.new()
+
+	# Use the slot name from GameState (set by title screen menus), fall back to "default"
+	if GameState.world_slot_name != "":
+		save_manager.world_name = GameState.world_slot_name
+	else:
+		save_manager.world_name = "default"
 
 	# Try to load existing world save
 	var meta = save_manager.load_world_meta()
@@ -108,6 +120,8 @@ func _ready() -> void:
 		GameState.world_seed = meta["world_seed"]
 		GameState.start_depth = meta["start_depth"]
 		GameState.saved_player_position = Vector2(meta["player_position_x"], meta["player_position_y"])
+		GameState.world_display_name = meta.get("display_name", save_manager.world_name)
+		GameState.playtime_seconds = meta.get("playtime_seconds", 0.0)
 		print("[ChunkManager] Loaded world save. Seed: %d" % GameState.world_seed)
 
 	# Initialize systems
@@ -166,11 +180,17 @@ func _process(_delta: float) -> void:
 	# Process generation queue
 	if _first_load:
 		# Force-load all chunks synchronously on first frame (no pop-in on game load)
+		# Phase 1: Generate all chunk data first (so neighbors exist for bitmasks)
+		for chunk_coord in chunks_to_generate:
+			if _is_chunk_needed(chunk_coord):
+				_generate_chunk_data(chunk_coord)
+		# Phase 2: Create visuals (bitmasks can now see all neighbor data)
 		while chunks_to_generate.size() > 0:
 			var chunk_coord: Vector2i = chunks_to_generate.pop_front()
 			if _is_chunk_needed(chunk_coord):
-				_load_chunk(chunk_coord)
+				_create_chunk_visuals(chunk_coord)
 		_first_load = false
+		initial_load_complete.emit()
 	else:
 		# Normal: generate up to 2 chunks per frame
 		_process_generation_queue()
@@ -228,29 +248,35 @@ func _is_chunk_needed(chunk_coord: Vector2i) -> bool:
 	return diff.x <= LOAD_RADIUS and diff.y <= LOAD_RADIUS
 
 
-## Generate (if needed) and load a chunk into the scene tree.
-func _load_chunk(chunk_coord: Vector2i) -> void:
+## Generate chunk data (load from save or generate from seed) without creating visuals.
+## Safe to call multiple times; skips if data already exists.
+func _generate_chunk_data(chunk_coord: Vector2i) -> void:
+	if generated_chunks.has(chunk_coord):
+		return
+
+	# Check for saved chunk first (player-modified chunks saved to disk)
+	var saved_data = save_manager.load_chunk(chunk_coord)
+	if saved_data != null:
+		world_data.set_chunk_tiles(chunk_coord, saved_data["tiles"])
+		# Restore torches
+		for tpos in saved_data["torches"]:
+			world_data.torches[tpos] = true
+		world_data.dirty_chunks[chunk_coord] = true
+	else:
+		# Generate fresh from seed
+		var chunk_tiles: Dictionary = world_generator.generate_chunk(chunk_coord)
+		world_data.set_chunk_tiles(chunk_coord, chunk_tiles)
+		_apply_structure_tiles_to_chunk(chunk_coord)
+	generated_chunks[chunk_coord] = true
+
+
+## Create the visual TileMapLayer for a chunk whose data already exists.
+## Builds bitmask visuals, spawns torches, and creates the darkness overlay.
+func _create_chunk_visuals(chunk_coord: Vector2i) -> void:
 	if active_chunks.has(chunk_coord):
 		return
 
 	var origin: Vector2i = WorldData.chunk_to_world(chunk_coord)
-
-	# Generate chunk data if not already generated
-	if not generated_chunks.has(chunk_coord):
-		# Check for saved chunk first (player-modified chunks saved to disk)
-		var saved_data = save_manager.load_chunk(chunk_coord)
-		if saved_data != null:
-			world_data.set_chunk_tiles(chunk_coord, saved_data["tiles"])
-			# Restore torches
-			for tpos in saved_data["torches"]:
-				world_data.torches[tpos] = true
-			world_data.dirty_chunks[chunk_coord] = true
-		else:
-			# Generate fresh from seed
-			var chunk_tiles: Dictionary = world_generator.generate_chunk(chunk_coord)
-			world_data.set_chunk_tiles(chunk_coord, chunk_tiles)
-			_apply_structure_tiles_to_chunk(chunk_coord)
-		generated_chunks[chunk_coord] = true
 
 	# Create TileMapLayer for this chunk
 	var tilemap := TileMapLayer.new()
@@ -265,8 +291,8 @@ func _load_chunk(chunk_coord: Vector2i) -> void:
 			var wpos: Vector2i = origin + Vector2i(x, y)
 			var tile_type: int = world_data.get_tile(wpos)
 			if tile_type != TileDatabase.TileType.EMPTY:
-				var atlas_coords: Vector2i = TileDatabase.get_atlas_coords(tile_type)
-				tilemap.set_cell(Vector2i(x, y), 0, atlas_coords)
+				var visual: Dictionary = _get_tile_visual(wpos, tile_type)
+				tilemap.set_cell(Vector2i(x, y), visual["source_id"], visual["atlas_coords"])
 
 	add_child(tilemap)
 	active_chunks[chunk_coord] = tilemap
@@ -279,6 +305,13 @@ func _load_chunk(chunk_coord: Vector2i) -> void:
 
 	# Create per-tile darkness overlay for this chunk
 	_create_darkness_overlay(chunk_coord)
+
+
+## Generate (if needed) and load a chunk into the scene tree.
+## Convenience wrapper that calls both phases sequentially.
+func _load_chunk(chunk_coord: Vector2i) -> void:
+	_generate_chunk_data(chunk_coord)
+	_create_chunk_visuals(chunk_coord)
 
 
 ## Unload a chunk from the scene tree. World data is preserved.
@@ -355,6 +388,9 @@ func _on_tile_mined(world_pos: Vector2i, tile_type: int, _tool_used: String) -> 
 	# Spawn dropped item
 	_spawn_dropped_item(world_pos, tile_type)
 
+	# Update neighbor visuals (they may now have exposed edges)
+	_update_neighbor_visuals(world_pos)
+
 
 ## Called when a tile is placed via GameServer. Update the visual tilemap.
 func _on_tile_placed(world_pos: Vector2i, tile_type: int) -> void:
@@ -362,8 +398,11 @@ func _on_tile_placed(world_pos: Vector2i, tile_type: int) -> void:
 	if active_chunks.has(chunk_coord):
 		var tilemap: TileMapLayer = active_chunks[chunk_coord]
 		var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
-		var atlas_coords: Vector2i = TileDatabase.get_atlas_coords(tile_type)
-		tilemap.set_cell(local_pos, 0, atlas_coords)
+		var visual: Dictionary = _get_tile_visual(world_pos, tile_type)
+		tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
+
+	# Update neighbor visuals (they may need to lose exposed edges)
+	_update_neighbor_visuals(world_pos)
 
 
 ## Spawn a dropped item at the world position of a mined tile.
@@ -384,7 +423,7 @@ func _spawn_dropped_item(world_pos: Vector2i, tile_type: int) -> void:
 
 ## Build the shared TileSet programmatically. Creates a texture atlas with
 ## one tile per type, colored according to TileDatabase properties.
-## Each tile gets full-square collision on physics layer 0 (World).
+## Then adds separate atlas sources for tile types with hand-drawn sprite sheets.
 func _build_tileset() -> TileSet:
 	var ts := TileSet.new()
 	ts.tile_size = Vector2i(TILE_SIZE, TILE_SIZE)
@@ -394,11 +433,32 @@ func _build_tileset() -> TileSet:
 	ts.set_physics_layer_collision_layer(0, 1)  # Layer 1 = World
 	ts.set_physics_layer_collision_mask(0, 0)
 
-	# Determine how many tile types we have (skip EMPTY)
+	# Build collision polygon
+	var half: float = TILE_SIZE / 2.0
+	collision_polygon = PackedVector2Array([
+		Vector2(-half, -half),
+		Vector2(half, -half),
+		Vector2(half, half),
+		Vector2(-half, half),
+	])
+
+	# Source ID 0: Programmatic colored tiles (fallback for types without art)
+	_add_programmatic_atlas(ts)
+
+	# Source IDs 1+: Autotile sheets for registered types
+	var next_source_id: int = 1
+	for tile_type in TileDatabase.autotile_textures:
+		_add_autotile_source(ts, tile_type, next_source_id)
+		next_source_id += 1
+
+	return ts
+
+
+## Add the programmatic colored-tile atlas as source 0.
+func _add_programmatic_atlas(ts: TileSet) -> void:
 	var tile_types: Array = TileDatabase.get_tile_types()
 	var atlas_width: int = tile_types.size()
 
-	# Create the atlas image programmatically
 	var img := Image.create(atlas_width * TILE_SIZE, TILE_SIZE, false, Image.FORMAT_RGBA8)
 
 	for i in range(tile_types.size()):
@@ -407,7 +467,6 @@ func _build_tileset() -> TileSet:
 		var x_offset: int = i * TILE_SIZE
 		for x in range(TILE_SIZE):
 			for y in range(TILE_SIZE):
-				# Add subtle variation for visual interest
 				var variation: float = (_hash_pixel(x_offset + x, y) - 0.5) * 0.1
 				var c := Color(
 					clampf(color.r + variation, 0.0, 1.0),
@@ -419,39 +478,148 @@ func _build_tileset() -> TileSet:
 
 	var tex := ImageTexture.create_from_image(img)
 
-	# Create atlas source
 	var atlas := TileSetAtlasSource.new()
 	atlas.texture = tex
 	atlas.texture_region_size = Vector2i(TILE_SIZE, TILE_SIZE)
-
-	# Add to tileset FIRST (learned from M2 bug - must add source before creating tiles)
 	ts.add_source(atlas, 0)
-
-	# Create tiles and collision for each type
-	var half: float = TILE_SIZE / 2.0
-	var collision_polygon := PackedVector2Array([
-		Vector2(-half, -half),
-		Vector2(half, -half),
-		Vector2(half, half),
-		Vector2(-half, half),
-	])
 
 	for i in range(tile_types.size()):
 		var coords := Vector2i(i, 0)
 		atlas.create_tile(coords)
 		var tile_data: TileData = atlas.get_tile_data(coords, 0)
-		# Water tiles have no collision so the player can pass through
 		if tile_types[i] != TileDatabase.TileType.WATER:
 			tile_data.add_collision_polygon(0)
 			tile_data.set_collision_polygon_points(0, 0, collision_polygon)
 
-	return ts
+
+## Add an autotile sprite sheet as a separate atlas source.
+func _add_autotile_source(ts: TileSet, tile_type: int, source_id: int) -> void:
+	var autotile_info: Dictionary = TileDatabase.autotile_textures[tile_type]
+	var texture: Texture2D = load(autotile_info["path"])
+	var block_offset: Vector2i = autotile_info["block_offset"]
+
+	var atlas := TileSetAtlasSource.new()
+	atlas.texture = texture
+	atlas.texture_region_size = Vector2i(TILE_SIZE, TILE_SIZE)
+	ts.add_source(atlas, source_id)
+
+	# Store source ID back in TileDatabase for runtime lookup
+	TileDatabase.autotile_source_ids[tile_type] = source_id
+
+	# Create tiles for all 13 autotile variants
+	# 9 from BITMASK_TO_ATLAS + 4 from INNER_CORNER_ATLAS
+	var created_coords: Dictionary = {}  # Avoid duplicates (center appears multiple times in bitmask table)
+
+	for bitmask_coords in TileDatabase.BITMASK_TO_ATLAS.values():
+		var coords: Vector2i = bitmask_coords + block_offset
+		if not created_coords.has(coords):
+			atlas.create_tile(coords)
+			var td: TileData = atlas.get_tile_data(coords, 0)
+			if tile_type != TileDatabase.TileType.WATER:
+				td.add_collision_polygon(0)
+				td.set_collision_polygon_points(0, 0, collision_polygon)
+			created_coords[coords] = true
+
+	for corner_coords in TileDatabase.INNER_CORNER_ATLAS.values():
+		var coords: Vector2i = corner_coords + block_offset
+		if not created_coords.has(coords):
+			atlas.create_tile(coords)
+			var td: TileData = atlas.get_tile_data(coords, 0)
+			if tile_type != TileDatabase.TileType.WATER:
+				td.add_collision_polygon(0)
+				td.set_collision_polygon_points(0, 0, collision_polygon)
+			created_coords[coords] = true
+
+	print("[ChunkManager] Autotile source %d registered for %s (%d variants)" % [
+		source_id, TileDatabase.get_properties(tile_type).get("name", "Unknown"), created_coords.size()])
 
 
 ## Simple pixel-position hash for tile texture variation.
 func _hash_pixel(x: int, y: int) -> float:
 	var h: int = hash(Vector2i(x, y))
 	return absf(float(h % 1000) / 1000.0)
+
+
+# --- Autotile bitmask ---
+
+## Cardinal neighbor offsets: N, E, S, W (matching bit positions 0-3).
+const CARDINAL_OFFSETS: Array[Vector2i] = [
+	Vector2i(0, -1),   # Bit 0: North
+	Vector2i(1, 0),    # Bit 1: East
+	Vector2i(0, 1),    # Bit 2: South
+	Vector2i(-1, 0),   # Bit 3: West
+]
+
+## Diagonal neighbor offsets: NW, NE, SW, SE.
+const DIAGONAL_OFFSETS: Dictionary = {
+	"NW": Vector2i(-1, -1),
+	"NE": Vector2i(1, -1),
+	"SW": Vector2i(-1, 1),
+	"SE": Vector2i(1, 1),
+}
+
+## Calculate 4-bit cardinal bitmask for a tile. Bit=1 means any non-empty neighbor present.
+func _calc_bitmask(world_pos: Vector2i) -> int:
+	var bitmask: int = 0
+	for i in range(CARDINAL_OFFSETS.size()):
+		var neighbor_pos: Vector2i = world_pos + CARDINAL_OFFSETS[i]
+		if world_data.get_tile(neighbor_pos) != TileDatabase.TileType.EMPTY:
+			bitmask |= (1 << i)
+	return bitmask
+
+
+## Get the visual source_id and atlas_coords for a tile at a world position.
+## Uses autotile bitmask for registered types, falls back to programmatic atlas.
+func _get_tile_visual(world_pos: Vector2i, tile_type: int) -> Dictionary:
+	if not TileDatabase.has_autotile(tile_type):
+		return {
+			"source_id": 0,
+			"atlas_coords": TileDatabase.get_atlas_coords(tile_type),
+		}
+
+	var source_id: int = TileDatabase.get_autotile_source_id(tile_type)
+	var block_offset: Vector2i = TileDatabase.autotile_textures[tile_type]["block_offset"]
+	var bitmask: int = _calc_bitmask(world_pos)
+	var atlas_coords: Vector2i = TileDatabase.BITMASK_TO_ATLAS[bitmask] + block_offset
+
+	# When fully surrounded, check diagonals for inner corners
+	if bitmask == 15:
+		for corner_name in TileDatabase.INNER_CORNER_ATLAS:
+			var diag_pos: Vector2i = world_pos + DIAGONAL_OFFSETS[corner_name]
+			if world_data.get_tile(diag_pos) == TileDatabase.TileType.EMPTY:
+				atlas_coords = TileDatabase.INNER_CORNER_ATLAS[corner_name] + block_offset
+				break  # First missing diagonal wins
+
+	return {
+		"source_id": source_id,
+		"atlas_coords": atlas_coords,
+	}
+
+
+## Update visuals for all 8 neighbors of a changed tile.
+## Handles cross-chunk boundaries.
+func _update_neighbor_visuals(center_pos: Vector2i) -> void:
+	var all_offsets: Array[Vector2i] = [
+		Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0),
+		Vector2i(-1, -1), Vector2i(1, -1), Vector2i(1, 1), Vector2i(-1, 1),
+	]
+	for offset in all_offsets:
+		var neighbor_pos: Vector2i = center_pos + offset
+		var neighbor_type: int = world_data.get_tile(neighbor_pos)
+		if neighbor_type != TileDatabase.TileType.EMPTY:
+			_update_single_tile_visual(neighbor_pos, neighbor_type)
+
+
+## Recalculate and update the visual for a single tile.
+func _update_single_tile_visual(world_pos: Vector2i, tile_type: int) -> void:
+	var chunk_coord: Vector2i = WorldData.world_to_chunk(world_pos)
+	if not active_chunks.has(chunk_coord):
+		return
+
+	var tilemap: TileMapLayer = active_chunks[chunk_coord]
+	var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
+	var visual: Dictionary = _get_tile_visual(world_pos, tile_type)
+	tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
 
 
 # --- Per-tile lighting ---
@@ -605,7 +773,7 @@ func save_all() -> void:
 	var player_pos := Vector2.ZERO
 	if GameState.player:
 		player_pos = GameState.player.global_position
-	save_manager.save_world_meta(GameState.world_seed, player_pos, GameState.start_depth)
+	save_manager.save_world_meta(GameState.world_seed, player_pos, GameState.start_depth, GameState.world_display_name, GameState.get_total_playtime())
 
 	# Save behavior tracker data
 	save_manager.save_behavior_data(BehaviorTracker)

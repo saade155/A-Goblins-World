@@ -13,7 +13,7 @@ extends RefCounted
 class_name SaveManager
 
 ## File format version for future migration support.
-const SAVE_VERSION: int = 3
+const SAVE_VERSION: int = 4
 
 ## Name of the current world (used in save path).
 var world_name: String = "default"
@@ -77,8 +77,8 @@ func has_saved_chunk(chunk_coord: Vector2i) -> bool:
 	return FileAccess.file_exists(_get_chunk_path(chunk_coord))
 
 
-## Save world metadata: seed, player position, start depth.
-func save_world_meta(world_seed: int, player_position: Vector2, start_depth: int) -> void:
+## Save world metadata: seed, player position, start depth, and slot info.
+func save_world_meta(world_seed: int, player_position: Vector2, start_depth: int, display_name: String = "", playtime_seconds: float = 0.0) -> void:
 	var path: String = _get_world_meta_path()
 	_ensure_directory(path.get_base_dir())
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -94,6 +94,9 @@ func save_world_meta(world_seed: int, player_position: Vector2, start_depth: int
 		"inventory_main": GameServer.inventory_main,
 		"inventory_hotbar": GameServer.inventory_hotbar,
 		"selected_hotbar": GameServer.selected_hotbar_slot,
+		"display_name": display_name,
+		"playtime_seconds": playtime_seconds,
+		"last_played": Time.get_datetime_string_from_system(),
 	}
 	file.store_var(data)
 	file.close()
@@ -101,6 +104,8 @@ func save_world_meta(world_seed: int, player_position: Vector2, start_depth: int
 
 
 ## Load world metadata. Returns Dictionary or null if no save exists.
+## v3 saves missing new fields get defaults: display_name=world_name,
+## playtime_seconds=0.0, last_played="Unknown".
 func load_world_meta() -> Variant:
 	var path: String = _get_world_meta_path()
 	if not FileAccess.file_exists(path):
@@ -121,6 +126,13 @@ func load_world_meta() -> Variant:
 		GameServer.inventory_hotbar = data["inventory_hotbar"]
 		GameServer.selected_hotbar_slot = data.get("selected_hotbar", 0)
 		GameServer.inventory_changed.emit()
+	# Backward compat: v3 saves lack slot metadata fields
+	if not data.has("display_name"):
+		data["display_name"] = world_name
+	if not data.has("playtime_seconds"):
+		data["playtime_seconds"] = 0.0
+	if not data.has("last_played"):
+		data["last_played"] = "Unknown"
 	return data
 
 
@@ -162,6 +174,98 @@ func load_behavior_data(tracker: Node) -> bool:
 ## Check if a world save exists.
 func has_save() -> bool:
 	return FileAccess.file_exists(_get_world_meta_path())
+
+
+## Scan user://worlds/ for all save slots and return metadata for each.
+## Returns Array[Dictionary] with keys: slot_name, display_name, playtime_seconds, last_played.
+## Sorted by last_played descending (most recent first).
+static func enumerate_slots() -> Array[Dictionary]:
+	var results: Array[Dictionary] = []
+	var base_path: String = "user://worlds/"
+	if not DirAccess.dir_exists_absolute(base_path):
+		return results
+	var dir := DirAccess.open(base_path)
+	if not dir:
+		return results
+	dir.list_dir_begin()
+	var entry: String = dir.get_next()
+	while entry != "":
+		if dir.current_is_dir() and entry != "." and entry != "..":
+			var meta_path: String = base_path + entry + "/world.dat"
+			if FileAccess.file_exists(meta_path):
+				var file := FileAccess.open(meta_path, FileAccess.READ)
+				if file:
+					var data = file.get_var()
+					file.close()
+					if data is Dictionary:
+						results.append({
+							"slot_name": entry,
+							"display_name": data.get("display_name", entry),
+							"playtime_seconds": data.get("playtime_seconds", 0.0),
+							"last_played": data.get("last_played", "Unknown"),
+						})
+		entry = dir.get_next()
+	dir.list_dir_end()
+	# Sort by last_played descending (most recent first).
+	# "Unknown" sorts before valid timestamps, pushing old v3 saves to the end.
+	results.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return a["last_played"] > b["last_played"]
+	)
+	return results
+
+
+## Recursively delete a save slot directory and all its contents.
+## Returns false if the slot directory doesn't exist.
+static func delete_slot(slot_name: String) -> bool:
+	var slot_path: String = "user://worlds/" + slot_name + "/"
+	if not DirAccess.dir_exists_absolute(slot_path):
+		return false
+	# Delete chunks subdirectory first
+	var chunks_path: String = slot_path + "chunks/"
+	if DirAccess.dir_exists_absolute(chunks_path):
+		var chunks_dir := DirAccess.open(chunks_path)
+		if chunks_dir:
+			chunks_dir.list_dir_begin()
+			var file_name: String = chunks_dir.get_next()
+			while file_name != "":
+				if not chunks_dir.current_is_dir():
+					chunks_dir.remove(file_name)
+				file_name = chunks_dir.get_next()
+			chunks_dir.list_dir_end()
+		DirAccess.remove_absolute(chunks_path)
+	# Delete top-level files in the slot directory
+	var slot_dir := DirAccess.open(slot_path)
+	if slot_dir:
+		slot_dir.list_dir_begin()
+		var file_name: String = slot_dir.get_next()
+		while file_name != "":
+			if not slot_dir.current_is_dir():
+				slot_dir.remove(file_name)
+			file_name = slot_dir.get_next()
+		slot_dir.list_dir_end()
+	# Remove the slot directory itself
+	DirAccess.remove_absolute(slot_path)
+	print("[SaveManager] Deleted save slot: %s" % slot_name)
+	return true
+
+
+## Generate a unique, filesystem-safe slot name from a display name.
+## Sanitizes to lowercase alphanumeric + underscores, appends counter if needed.
+static func generate_slot_name(display_name: String) -> String:
+	var sanitized: String = display_name.to_lower().replace(" ", "_")
+	var result: String = ""
+	for i in sanitized.length():
+		var c: String = sanitized[i]
+		if c == "_" or (c >= "a" and c <= "z") or (c >= "0" and c <= "9"):
+			result += c
+	if result == "":
+		result = "world"
+	var base: String = result
+	var counter: int = 1
+	while DirAccess.dir_exists_absolute("user://worlds/" + result + "/"):
+		counter += 1
+		result = "%s_%d" % [base, counter]
+	return result
 
 
 ## Ensure a directory exists, creating it recursively if needed.

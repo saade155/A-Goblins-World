@@ -17,7 +17,7 @@ var world_data = null
 var world_generator: WorldGenerator = null
 
 ## Current world seed. Used for deterministic generation.
-## Generated randomly on startup; will be saveable/loadable later.
+## Set by new game menu or loaded from a save file.
 var world_seed: int = 0
 
 ## Starting depth in tiles. Higher = deeper underground.
@@ -27,12 +27,26 @@ var start_depth: int = 170
 ## Saved player position from a loaded game. Null = new game (use start_depth).
 var saved_player_position: Variant = null
 
+## Whether a game session is currently active (in-world, not in menus).
+var is_game_active: bool = false
+
+## The slot folder name for the current world save (e.g. "slot_1").
+var world_slot_name: String = ""
+
+## The user-facing display name for the current world (e.g. "My World").
+var world_display_name: String = ""
+
+## Total playtime for the current world in seconds.
+var playtime_seconds: float = 0.0
+
 
 func _ready() -> void:
-	# Generate a random seed for this world
-	randomize()
-	world_seed = randi()
-	print("[GameState] Initialized. World seed: %d" % world_seed)
+	print("[GameState] Initialized.")
+
+
+func _process(delta: float) -> void:
+	if is_game_active and not get_tree().paused:
+		playtime_seconds += delta
 
 
 ## Register the player node. Called by the player scene on _ready().
@@ -51,3 +65,23 @@ func register_player(player_node: CharacterBody2D) -> void:
 func unregister_player() -> void:
 	player = null
 	print("[GameState] Player unregistered.")
+
+
+## Reset all state to defaults. Called when returning to main menu or starting fresh.
+func reset_for_new_game() -> void:
+	player = null
+	world_data = null
+	world_generator = null
+	saved_player_position = null
+	playtime_seconds = 0.0
+	is_game_active = false
+	world_slot_name = ""
+	world_display_name = ""
+	world_seed = 0
+	start_depth = 170
+	print("[GameState] State reset for new game.")
+
+
+## Returns the total playtime in seconds for the current world.
+func get_total_playtime() -> float:
+	return playtime_seconds

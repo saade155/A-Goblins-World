@@ -77,6 +77,14 @@ func _ready() -> void:
 	_initialize_inventory()
 
 
+## Reset all session-specific state. Called when returning to main menu or starting a new game.
+func reset_state() -> void:
+	world_data = null
+	selected_hotbar_slot = 0
+	_initialize_inventory()
+	print("[GameServer] State reset.")
+
+
 ## Called by the world scene to register the authoritative world data.
 func initialize_world(data: WorldData) -> void:
 	world_data = data

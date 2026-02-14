@@ -245,7 +245,7 @@ World generates seamlessly in any direction. No pop-in, no frame drops. Modified
 
 ---
 
-## Milestone 4: Inventory, Crafting, and Menus (NEXT)
+## Milestone 4: Inventory, Crafting, and Menus (IN PROGRESS — 4B NEXT)
 
 **Goal:** Full inventory system with station-based crafting, quality foundation, and complete menu infrastructure (title screen, pause menu, settings, save slots).
 
@@ -302,6 +302,171 @@ World generates seamlessly in any direction. No pop-in, no frame drops. Modified
 3. **Menus:** Title screen → New Game starts fresh world. Escape pauses. Settings persist. Save & Quit → Load Game restores state
 4. **Save slots:** Create multiple worlds, load each independently, delete a save
 5. **BehaviorTracker:** `get_count("items_crafted")` is accurate
+
+---
+
+## Milestone 4.5 — Player Animation & Sprite Integration
+**Status:** NEXT
+**Depends on:** M1 (player scene exists)
+
+### Goals
+- Replace placeholder sprite with authored goblin sprite sheet
+- Wire up all core gameplay animations via AnimationPlayer
+- Implement eye blink overlay system for character expressiveness
+- Establish sprite sheet conventions for future art (mobs, NPCs)
+
+### Sprite Sheet Conventions
+- **Frame size:** 32×48px
+- **Sheet size:** 320×480 (10 columns × 10 rows)
+- **Layout:** One row per animation, max 10 frames per animation
+- **Direction:** Left-facing art, flip_h in code for right
+- **Body centered** in all frames (no root motion offset)
+- **Separate sheets** for cosmetic/situational animations (emotes, dances)
+
+### Tasks
+1. **Sprite sheet integration**
+   - Import `assets/sprites/player/goblin_spritesheet.png`
+   - Configure Sprite2D with hframes=10, vframes=10
+   - Set up import settings (pixel art filtering, no mipmaps)
+
+2. **AnimationPlayer setup**
+   - Idle animation (row 0)
+   - Walk animation (row 1, 8 frames)
+   - Run animation (row 2, 8 frames)
+   - Jump + Fall animation (row 3, 10 frames)
+   - Future rows reserved: attack, mine, hurt, etc.
+
+3. **Eye blink overlay**
+   - Separate small sprite for eye region (~8×4px)
+   - BlinkTimer with random 3-6 second interval
+   - Blink sequence: open → half → closed → half → open (~0.15s)
+   - Y-offset arrays per animation to track head bob
+
+4. **Animation state machine**
+   - Wire movement states to animation playback in player.gd
+   - Handle transitions (idle↔walk, jump→fall, land→idle)
+   - Flip sprite based on movement direction
+
+5. **In-game tuning pass**
+   - Animation speeds per state
+   - Transition timing
+   - Visual feel at game resolution (960×540 → 1920×1080)
+
+### Future Note
+> Mob and NPC sprites will follow the same sheet conventions (32×48 frames, 320×480 sheets, row-per-animation). Their art integration will be scoped alongside M6 (Combat) and M7 (Enemy AI) respectively.
+
+---
+
+## Milestone 4.6 — Tile Edge & Ore Overlay System
+**Status:** PENDING
+**Depends on:** M3 (chunk/tile system exists)
+
+### Goals
+- Implement edge and ore overlay rendering as two additional TileMapLayers per chunk
+- Replace current 20-variant bitmask with clean base + overlay approach
+- Add ore protrusion sprites that extend beyond tile boundaries for visual depth
+- Establish tile art pipeline: 14 edge pieces per tile type + 12 protrusion pieces per ore type
+- Build infrastructure reusable by background walls (M8)
+
+### Layer Breakdown
+```
+Torches          (Z=-1)  — torch sprites
+Base layer       (Z=0)   — interior tile fills, collision
+Edge overlay     (Z=1)   — tile edges/corners (renders behind player)
+Player           (Z=2)   — player z_index set to 2
+Ore overlay      (Z=3)   — ore protrusions into neighbor tiles (renders in front of player)
+Darkness         (Z=5)   — darkness/lighting overlay
+```
+
+### Tile Art Convention
+- **Base layer (Z=0):** Interior/center texture only (1 piece per tile type)
+- **Edge layer (Z=1):** Transparent edge sprites on a second TileMapLayer
+- **Ore layer (Z=3):** Ore protrusion sprites on a third TileMapLayer
+- **Per tile type (edges):** 14 art pieces — 1 interior fill, 4 cardinal edges, 4 outer corners, 4 inner corners
+- **Per ore type (protrusions):** 4-12 art pieces — 4 cardinal protrusions (minimum), + 4 outer corners + 4 inner corners (full set)
+
+### Tasks
+1. **Two additional TileMapLayers per chunk**
+   - Add edge overlay TileMapLayer (Z=1) to chunk scene
+   - Add ore overlay TileMapLayer (Z=3) to chunk scene
+   - Chunk manager creates/manages all three layers
+   - Set player z_index to 2
+
+2. **Edge detection & bitmask**
+   - Neighbor sampling for edge determination
+   - Handle chunk boundaries (cross-chunk neighbor lookups)
+   - Determine which edge/corner pieces to place per tile
+
+3. **Edge tile atlas**
+   - Import edge sprite sheets (14 pieces per tile type)
+   - Configure TileSet atlas for edge tiles
+   - Map edge bitmask results to atlas coordinates
+
+4. **Ore protrusion system**
+   - Vein-edge detection: protrusions only on ore tiles adjacent to non-ore neighbors
+   - Place protrusion sprites on neighboring tile cells (extending 4-8px from ore boundary)
+   - Same neighbor-detection logic as edges, applied to ore types
+
+5. **Ore protrusion atlas**
+   - Import ore protrusion sprite sheets per ore type
+   - Configure TileSet atlas for ore overlay tiles
+   - Map vein-edge bitmask results to atlas coordinates
+
+6. **Migrate existing tiles**
+   - Convert stone tiles to base + edge overlay
+   - Convert dirt tiles to base + edge overlay
+   - Remove old 20-variant bitmask system from tile_data.gd
+
+7. **Depth/lighting integration**
+   - Edge pieces support directional shading (floor faces lit, ceiling shadows)
+   - Prepare hooks for future ambient occlusion / depth effects
+
+8. **Cross-tile-type edges**
+   - Handle transitions between different tile types (dirt meeting stone)
+   - Priority system for which tile type's edge renders on top
+
+### Art Deliverables (Christian)
+> **Edge sprites** — while coding proceeds, create edge sprite sheets for:
+> - Stone (14 pieces)
+> - Dirt (14 pieces)
+> - Additional tile types as needed
+>
+> **Ore protrusion sprites** — per ore type:
+> - Iron ore protrusions (4 cardinal minimum, 12 full set)
+> - Gold ore protrusions
+> - Crystal ore protrusions
+> - Additional ore types as needed
+>
+> Protrusions extend 4-8px beyond tile boundary. Each piece is 32x32 with transparency.
+
+### Future Note
+> This TileMapLayer infrastructure will be reused by M8 (Building & Defenses) for background walls. M8 adds wall tile content and room enclosure logic on top of what M4.6 builds.
+
+---
+
+## Milestone 4.7 — Enhanced Save System
+**Status:** PENDING
+**Depends on:** M4B (menus + basic save slots)
+
+### Goals
+- Refactor save structure to support multiple snapshots per world
+- Add autosave (timer-based + event-triggered)
+- Add manual save with player-chosen names
+- Save browser UI for loading past save points
+- "Saving..." overlay with minimum display time
+
+### Tasks
+1. Migrate directory structure (current/ + saves/ layout)
+2. SaveManager refactor for snapshot operations (create, copy, load, delete)
+3. Autosave timer + event trigger system
+4. Manual save UI (name input dialog from pause menu)
+5. Save browser UI (list saves within a world, load/delete)
+6. "Saving..." overlay with minimum 2-second display
+7. Backward compatibility migration for existing saves
+8. Load Game menu update (world → save point two-level selection)
+
+### Design Reference
+See `docs/plans/save-system.md` for full design details.
 
 ---
 
@@ -519,6 +684,8 @@ Caves feel alive with enemies. Each type behaves distinctly. Depth scaling is no
 ## Milestone 8: Building and Defenses
 
 **Goal:** Proper base building with background walls, furniture, functional defenses. Opt-in escalation system. Construction skill matters.
+
+> **Note:** The background wall TileMapLayer infrastructure (second TileMapLayer per chunk, edge overlay system, cross-chunk rendering) is built in M4.6. This milestone adds wall tile content, room enclosure detection, and wall gameplay — not the rendering layer itself.
 
 ### What Gets Built
 

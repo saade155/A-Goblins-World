@@ -23,6 +23,9 @@ signal jump_released
 ## Emitted when the hotbar selection changes.
 signal hotbar_changed(slot: int)
 
+## Emitted the frame pause is pressed.
+signal pause_pressed
+
 
 ## Track previous jump state to detect edges for signals.
 var _jump_held_last_frame: bool = false
@@ -45,6 +48,10 @@ func _process(_delta: float) -> void:
 		jump_released.emit()
 
 	_jump_held_last_frame = jump_held
+
+	# Emit pause signal on press.
+	if Input.is_action_just_pressed("pause"):
+		pause_pressed.emit()
 
 	# Check hotbar number keys (1-9,0 map to slots 0-9).
 	for i in range(10):
@@ -115,3 +122,23 @@ func is_debug_fog_toggle_just_pressed() -> bool:
 ## Returns true only on the frame the place torch key was pressed.
 func is_place_torch_just_pressed() -> bool:
 	return Input.is_action_just_pressed("place_torch")
+
+
+# --- Pause input ---
+
+## Returns true only on the frame the pause action was first pressed.
+func is_pause_just_pressed() -> bool:
+	return Input.is_action_just_pressed("pause")
+
+
+# --- Debug input ---
+
+## Returns true only on the frame the fly-mode toggle key was pressed.
+func is_fly_toggle_just_pressed() -> bool:
+	return Input.is_action_just_pressed("toggle_fly")
+
+
+## Returns the vertical movement direction for fly mode.
+## -1.0 = up (jump), 1.0 = down (move_down), 0.0 = no input.
+func get_fly_vertical_direction() -> float:
+	return Input.get_axis("jump", "move_down")
