@@ -43,7 +43,7 @@ const AMBIENT_FLOOR: float = 0.03
 const DARKNESS_Z_INDEX: int = 5
 
 ## Z-index for torch sprites (above darkness overlay).
-const TORCH_SPRITE_Z_INDEX: int = 6
+const TORCH_SPRITE_Z_INDEX: int = -1
 
 ## The authoritative world data.
 var world_data: WorldData

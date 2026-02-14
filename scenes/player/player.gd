@@ -6,8 +6,6 @@
 ## - Coyote time (brief window to jump after leaving a ledge)
 ## - Jump buffer (press jump slightly before landing, still registers)
 ##
-## Also includes a simple inventory system (array-based, no UI yet).
-##
 ## ALL input goes through InputManager. This script NEVER calls Input directly.
 ## State changes that affect the world go through GameServer.
 
@@ -66,18 +64,6 @@ var _distance_initialized: bool = false
 
 ## Cached reference to the Sprite2D for flipping.
 @onready var _sprite: Sprite2D = $Sprite2D
-
-# --- Inventory ---
-
-## Simple inventory: each entry is {"item": String, "amount": int}.
-var inventory: Array[Dictionary] = []
-
-## Currently selected hotbar slot (0-4). Tracks which block type to place.
-var selected_hotbar: int = 0
-
-## Maps hotbar slot index to a display name for debug printing.
-var _hotbar_names: Array[String] = ["Dirt", "Stone", "Iron Ore", "(empty)", "(empty)"]
-
 
 func _ready() -> void:
 	# Register with GameState so other systems can find the player.
@@ -197,67 +183,7 @@ func _track_movement_distance() -> void:
 	_last_position = global_position
 
 
-# --- Inventory ---
-
-## Add an item to the inventory. Stacks with existing entries of the same type.
-func add_item(item_type: String, amount: int) -> void:
-	for entry in inventory:
-		if entry["item"] == item_type:
-			entry["amount"] += amount
-			_print_inventory()
-			return
-
-	# New item type -- add a new entry.
-	inventory.append({"item": item_type, "amount": amount})
-	_print_inventory()
-
-
-## Remove an item from the inventory. Returns false if not enough.
-func remove_item(item_type: String, amount: int) -> bool:
-	for i in range(inventory.size()):
-		if inventory[i]["item"] == item_type:
-			if inventory[i]["amount"] >= amount:
-				inventory[i]["amount"] -= amount
-				if inventory[i]["amount"] <= 0:
-					inventory.remove_at(i)
-				_print_inventory()
-				return true
-			else:
-				return false
-	return false
-
-
-## Check if the player has at least the specified amount of an item.
-func has_item(item_type: String, amount: int = 1) -> bool:
-	for entry in inventory:
-		if entry["item"] == item_type and entry["amount"] >= amount:
-			return true
-	return false
-
-
-## Get the count of a specific item type in the inventory.
-func get_item_count(item_type: String) -> int:
-	for entry in inventory:
-		if entry["item"] == item_type:
-			return entry["amount"]
-	return 0
-
-
-## Debug print inventory contents.
-func _print_inventory() -> void:
-	if inventory.is_empty():
-		print("[Inventory] Empty")
-		return
-	var items_str := ""
-	for entry in inventory:
-		if items_str != "":
-			items_str += ", "
-		items_str += "%s x%d" % [entry["item"], entry["amount"]]
-	print("[Inventory] %s" % items_str)
-
-
 ## Called when hotbar selection changes via InputManager.
+## Delegates to GameServer which owns the hotbar state.
 func _on_hotbar_changed(slot: int) -> void:
-	selected_hotbar = slot
-	var name_str: String = _hotbar_names[slot] if slot < _hotbar_names.size() else "(unknown)"
-	print("[Hotbar] Selected slot %d: %s" % [slot + 1, name_str])
+	GameServer.request_select_hotbar(slot)

@@ -28,15 +28,6 @@ var mine_progress: float = 0.0
 ## The hardness of the currently targeted tile (how much progress needed to break it).
 var target_hardness: float = 0.0
 
-## Hotbar slot-to-tile mapping for placement. Slot index -> TileType.
-var _hotbar_tiles: Array[int] = [
-	1,  # Slot 0 (key 1) = DIRT
-	2,  # Slot 1 (key 2) = STONE
-	3,  # Slot 2 (key 3) = IRON_ORE
-	0,  # Slot 3 (key 4) = unused
-	0,  # Slot 4 (key 5) = unused
-]
-
 ## Cached reference to the tile highlight sprite.
 @onready var _highlight: Sprite2D = $TileHighlight
 
@@ -130,11 +121,12 @@ func _process(delta: float) -> void:
 	# --- Placement logic ---
 	if in_range and InputManager.is_place_just_pressed():
 		if GameServer.world_data and not GameServer.world_data.has_tile(tile_coord):
-			var hotbar_slot := InputManager.get_selected_hotbar()
-			if hotbar_slot >= 0 and hotbar_slot < _hotbar_tiles.size():
-				var tile_type: int = _hotbar_tiles[hotbar_slot]
-				if tile_type != TileDatabase.TileType.EMPTY:
-					GameServer.request_place(get_parent(), tile_coord, tile_type)
+			var slot: Dictionary = GameServer.get_selected_hotbar_item()
+			if slot["item_id"] != "":
+				if slot["item_id"] == "torch":
+					GameServer.request_place_torch(get_parent(), tile_coord)
+				elif ItemDatabase.is_placeable(slot["item_id"]):
+					GameServer.request_place_with_inventory(get_parent(), tile_coord, slot["item_id"])
 
 	# --- Torch placement (T key) ---
 	if in_range and InputManager.is_place_torch_just_pressed():

@@ -13,7 +13,7 @@ extends RefCounted
 class_name SaveManager
 
 ## File format version for future migration support.
-const SAVE_VERSION: int = 2
+const SAVE_VERSION: int = 3
 
 ## Name of the current world (used in save path).
 var world_name: String = "default"
@@ -91,6 +91,9 @@ func save_world_meta(world_seed: int, player_position: Vector2, start_depth: int
 		"player_position_x": player_position.x,
 		"player_position_y": player_position.y,
 		"start_depth": start_depth,
+		"inventory_main": GameServer.inventory_main,
+		"inventory_hotbar": GameServer.inventory_hotbar,
+		"selected_hotbar": GameServer.selected_hotbar_slot,
 	}
 	file.store_var(data)
 	file.close()
@@ -107,11 +110,17 @@ func load_world_meta() -> Variant:
 		return null
 	var data: Dictionary = file.get_var()
 	file.close()
-	# Reject saves from older tile-size era (v1 used 16px tiles, v2 uses 32px)
+	# Reject saves from older tile-size era (v1 used 16px tiles, v2+ uses 32px)
 	var version: int = data.get("version", 1)
 	if version < 2:
-		print("[SaveManager] WARNING: Save version %d is from the 16px tile era. Generating new world." % version)
+		print("[SaveManager] WARNING: Save version %d is incompatible. Generating new world." % version)
 		return null
+	# Restore inventory if present (v3+). Old v2 saves just skip this.
+	if data.has("inventory_main"):
+		GameServer.inventory_main = data["inventory_main"]
+		GameServer.inventory_hotbar = data["inventory_hotbar"]
+		GameServer.selected_hotbar_slot = data.get("selected_hotbar", 0)
+		GameServer.inventory_changed.emit()
 	return data
 
 

@@ -27,7 +27,7 @@ signal hotbar_changed(slot: int)
 ## Track previous jump state to detect edges for signals.
 var _jump_held_last_frame: bool = false
 
-## Currently selected hotbar slot (0-4). -1 means nothing selected.
+## Currently selected hotbar slot (0-9). -1 means nothing selected.
 var _selected_hotbar: int = 0
 
 
@@ -46,8 +46,8 @@ func _process(_delta: float) -> void:
 
 	_jump_held_last_frame = jump_held
 
-	# Check hotbar number keys (1-5 map to slots 0-4).
-	for i in range(5):
+	# Check hotbar number keys (1-9,0 map to slots 0-9).
+	for i in range(10):
 		var action_name := "hotbar_%d" % (i + 1)
 		if Input.is_action_just_pressed(action_name):
 			_selected_hotbar = i
@@ -95,7 +95,7 @@ func is_place_just_pressed() -> bool:
 	return Input.is_action_just_pressed("place")
 
 
-## Returns the currently selected hotbar slot index (0-4).
+## Returns the currently selected hotbar slot index (0-9).
 func get_selected_hotbar() -> int:
 	return _selected_hotbar
 

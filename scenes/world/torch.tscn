@@ -4,6 +4,7 @@
 size = Vector2(8, 16)
 
 [node name="Torch" type="Node2D"]
+z_index = -1
 
 [node name="Sprite" type="Sprite2D" parent="."]
 modulate = Color(1.0, 0.7, 0.2, 1.0)

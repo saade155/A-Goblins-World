@@ -66,7 +66,11 @@ func initialize(type: String, count: int, spawn_pos: Vector2) -> void:
 
 
 ## Called when a body enters the PickupArea. If it's the player, collect the item.
+## Handles partial pickup: if inventory is full, the drop remains with the remainder.
 func _on_pickup_area_body_entered(body: Node2D) -> void:
 	if body == GameState.player:
-		GameServer.request_collect_item(body, item_type, amount)
-		queue_free()
+		var remainder: int = GameServer.request_collect_item(body, item_type, amount)
+		if remainder <= 0:
+			queue_free()
+		else:
+			amount = remainder

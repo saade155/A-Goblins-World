@@ -4,7 +4,7 @@
 
 | Setting | Value |
 |---------|-------|
-| **Palette** | ENDESGA-64 (Lospec) — can swap later, engine has no palette dependency |
+| **Palette** | Duel by Arilyn (256 colors, Lospec) — can swap later, engine has no palette dependency |
 | **Tool** | Aseprite (recommended) |
 | **Viewport** | 640×360, integer scale (3× → 1080p, 4× → 1440p) |
 | **Resolution target** | 1440p primary, graceful downgrade to 1080p. Sharper pixels at higher res, same visible area. |
@@ -25,11 +25,11 @@
 
 ## Color Palette
 
-**ENDESGA-64** by ENDESGA — download from Lospec and load into Aseprite.
+**Duel** by Arilyn — 256 colors, download from Lospec and load into Aseprite.
 
-In Aseprite: `Sprite → Color Mode → Indexed`, then load the palette via `Palette → Load Palette`. This locks you to only those 64 colors.
+In Aseprite: `Sprite → Color Mode → Indexed`, then load the palette via `Palette → Load Palette`. This locks you to only those 256 colors.
 
-If the palette feels too limiting later, we can switch. The engine has no palette dependency — it's purely an art-side constraint for visual consistency.
+If the palette needs changing later, we can swap freely. The engine has no palette dependency — it's purely an art-side constraint for visual consistency.
 
 ## World Layer Model
 
@@ -279,7 +279,7 @@ General direction when we get there:
 ## Aseprite Workflow Summary
 
 1. **New file** → set canvas size (32×48 for goblin, 32×32 for tiles/items)
-2. **Load palette** → Palette → Load Palette → select ENDESGA-64
+2. **Load palette** → Palette → Load Palette → select Duel (by Arilyn)
 3. **Set indexed mode** → Sprite → Color Mode → Indexed (locks to palette)
 4. **Draw/animate** → timeline at bottom, one frame per column
 5. **Onion skin** → toggle onion icon to see previous/next frames while drawing
