@@ -480,6 +480,29 @@ func get_corner_coords(corner_name: String, world_pos: Vector2i) -> Vector2i:
 	return variants[idx]
 
 
+## Get corner atlas coords based on the source tile's neighbor context.
+## adj_vertical: true if source tile has a solid neighbor in the vertical direction adjacent to this corner
+## adj_horizontal: true if source tile has a solid neighbor in the horizontal direction adjacent to this corner
+## For TL corner: adj_vertical=has_N, adj_horizontal=has_W
+## For TR corner: adj_vertical=has_N, adj_horizontal=has_E
+## For BL corner: adj_vertical=has_S, adj_horizontal=has_W
+## For BR corner: adj_vertical=has_S, adj_horizontal=has_E
+func get_corner_coords_contextual(corner_name: String, adj_vertical: bool, adj_horizontal: bool) -> Vector2i:
+	var variants: Array = CORNER_ATLAS[corner_name]
+	# Index mapping:
+	# 0 = block (both present), 1 = pillar (vertical only), 2 = bar (horizontal only), 3 = alone (neither)
+	var idx: int = 0
+	if adj_vertical and adj_horizontal:
+		idx = 0  # block
+	elif adj_vertical:
+		idx = 1  # pillar
+	elif adj_horizontal:
+		idx = 2  # bar
+	else:
+		idx = 3  # alone
+	return variants[idx]
+
+
 ## Get inner corner overlay atlas coords for a diagonal direction.
 func get_inner_corner_overlay_coords(diagonal_name: String, world_pos: Vector2i) -> Vector2i:
 	var variants: Array = INNER_CORNER_OVERLAY_ATLAS.get(diagonal_name, [])

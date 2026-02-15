@@ -49,10 +49,18 @@ const EDGE_WALL_L_Z_INDEX: int = 2
 const EDGE_WALL_R_Z_INDEX: int = 3
 ## Z-index for ceiling (bottom) edge overlays.
 const EDGE_CEILING_Z_INDEX: int = 4
+## Z-index for SE inner corner overlay (separate from edges to avoid conflicts).
+const CORNER_SE_Z_INDEX: int = 5
+## Z-index for SW inner corner overlay.
+const CORNER_SW_Z_INDEX: int = 6
+## Z-index for NE inner corner overlay.
+const CORNER_NE_Z_INDEX: int = 7
+## Z-index for NW inner corner overlay.
+const CORNER_NW_Z_INDEX: int = 8
 ## Z-index for the player character.
-const PLAYER_Z_INDEX: int = 5
+const PLAYER_Z_INDEX: int = 9
 ## Z-index for darkness overlay sprites (above terrain).
-const DARKNESS_Z_INDEX: int = 7
+const DARKNESS_Z_INDEX: int = 11
 
 ## Z-index for torch sprites (above darkness overlay).
 const TORCH_SPRITE_Z_INDEX: int = -1
@@ -345,6 +353,20 @@ func _create_chunk_visuals(chunk_coord: Vector2i) -> void:
 		edge_layer.z_index = edge_z_values[i]
 		add_child(edge_layer)
 		active_chunks[chunk_coord][edge_layer_names[i]] = edge_layer
+
+	# Create inner corner overlay TileMapLayers (no collision, dedicated to avoid edge conflicts)
+	var corner_layer_names: Array = ["corner_se", "corner_sw", "corner_ne", "corner_nw"]
+	var corner_z_values: Array = [CORNER_SE_Z_INDEX, CORNER_SW_Z_INDEX, CORNER_NE_Z_INDEX, CORNER_NW_Z_INDEX]
+
+	for i in range(corner_layer_names.size()):
+		var corner_layer := TileMapLayer.new()
+		corner_layer.name = "Chunk_%d_%d_%s" % [chunk_coord.x, chunk_coord.y, corner_layer_names[i]]
+		corner_layer.tile_set = shared_tileset
+		corner_layer.position = Vector2(chunk_coord.x * PIXEL_CHUNK_SIZE, chunk_coord.y * PIXEL_CHUNK_SIZE)
+		corner_layer.collision_enabled = false
+		corner_layer.z_index = corner_z_values[i]
+		add_child(corner_layer)
+		active_chunks[chunk_coord][corner_layer_names[i]] = corner_layer
 
 	chunk_loaded.emit(chunk_coord)
 
@@ -776,7 +798,7 @@ func _clear_overlays_at(world_pos: Vector2i) -> void:
 		return
 	var chunk_layers: Dictionary = active_chunks[chunk_coord]
 	var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
-	for layer_name in ["edge_floor", "edge_wall_l", "edge_wall_r", "edge_ceiling"]:
+	for layer_name in ["edge_floor", "edge_wall_l", "edge_wall_r", "edge_ceiling", "corner_se", "corner_sw", "corner_ne", "corner_nw"]:
 		var layer: TileMapLayer = chunk_layers.get(layer_name, null)
 		if layer:
 			layer.erase_cell(local_pos)
@@ -857,14 +879,14 @@ func _calculate_cell_overlays(empty_pos: Vector2i) -> void:
 	# the inner corner (acceptable — inner corners are decorative).
 	var diag_checks: Array = [
 		# [diag_offset, adj1_offset, adj2_offset, corner_name, layer]
-		# TL of cell: solid at NW, N+W solid. edge_floor free if S empty.
-		[Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), "SE", "edge_floor"],
-		# TR of cell: solid at NE, N+E solid. edge_wall_r free if W empty.
-		[Vector2i(1, -1), Vector2i(0, -1), Vector2i(1, 0), "SW", "edge_wall_r"],
-		# BL of cell: solid at SW, S+W solid. edge_wall_l free if E empty.
-		[Vector2i(-1, 1), Vector2i(0, 1), Vector2i(-1, 0), "NE", "edge_wall_l"],
-		# BR of cell: solid at SE, S+E solid. edge_ceiling free if N empty.
-		[Vector2i(1, 1), Vector2i(0, 1), Vector2i(1, 0), "NW", "edge_ceiling"],
+		# TL of cell: solid at NW, N+W solid. Dedicated corner layer avoids edge conflict.
+		[Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), "SE", "corner_se"],
+		# TR of cell: solid at NE, N+E solid. Dedicated corner layer avoids edge conflict.
+		[Vector2i(1, -1), Vector2i(0, -1), Vector2i(1, 0), "SW", "corner_sw"],
+		# BL of cell: solid at SW, S+W solid. Dedicated corner layer avoids edge conflict.
+		[Vector2i(-1, 1), Vector2i(0, 1), Vector2i(-1, 0), "NE", "corner_ne"],
+		# BR of cell: solid at SE, S+E solid. Dedicated corner layer avoids edge conflict.
+		[Vector2i(1, 1), Vector2i(0, 1), Vector2i(1, 0), "NW", "corner_nw"],
 	]
 
 	for check in diag_checks:
@@ -892,6 +914,68 @@ func _calculate_cell_overlays(empty_pos: Vector2i) -> void:
 			var block_offset: Vector2i = TileDatabase.autotile_textures[diag_type]["block_offset"]
 			var corner_coords: Vector2i = TileDatabase.get_inner_corner_overlay_coords(corner_name, empty_pos) + block_offset
 			_place_overlay_on_cell(empty_pos, edge_sid, corner_coords, layer_name)
+
+	# L-shape corners: two adjacent cardinals solid, diagonal between them empty.
+	# The empty cell detects the L-shape, then pushes the overlay onto the
+	# neighboring SOLID cell (the one with lower Y = higher on screen = target).
+	# The source tile (higher Y) provides the corner art.
+	# Context is determined by the source tile's full cardinal neighborhood
+	# (has any vertical neighbor? has any horizontal neighbor?).
+	var lshape_checks: Array = [
+		# [card1_offset, card2_offset, diag_offset, target_is_card1, corner_name, layer_name]
+		# Case A: N+E solid, NE empty -> target=N, source=E, corner TL
+		[Vector2i(0, -1), Vector2i(1, 0), Vector2i(1, -1), true, "TL", "edge_floor"],
+		# Case B: N+W solid, NW empty -> target=N, source=W, corner TR
+		[Vector2i(0, -1), Vector2i(-1, 0), Vector2i(-1, -1), true, "TR", "edge_wall_r"],
+		# Case C: S+E solid, SE empty -> target=E, source=S, corner TR
+		[Vector2i(0, 1), Vector2i(1, 0), Vector2i(1, 1), false, "TR", "edge_wall_r"],
+		# Case D: S+W solid, SW empty -> target=W, source=S, corner TL
+		[Vector2i(0, 1), Vector2i(-1, 0), Vector2i(-1, 1), false, "TL", "edge_floor"],
+	]
+
+	for check in lshape_checks:
+		var card1_offset: Vector2i = check[0]
+		var card2_offset: Vector2i = check[1]
+		var diag_offset: Vector2i = check[2]
+		var target_is_card1: bool = check[3]
+		var corner_name: String = check[4]
+		var layer_name: String = check[5]
+
+		var card1_pos: Vector2i = empty_pos + card1_offset
+		var card2_pos: Vector2i = empty_pos + card2_offset
+		var diag_pos: Vector2i = empty_pos + diag_offset
+
+		var card1_type: int = world_data.get_tile(card1_pos)
+		var card2_type: int = world_data.get_tile(card2_pos)
+		var diag_type: int = world_data.get_tile(diag_pos)
+
+		# L-shape: both cardinals solid, diagonal empty
+		if card1_type == TileDatabase.TileType.EMPTY or card2_type == TileDatabase.TileType.EMPTY:
+			continue
+		if diag_type != TileDatabase.TileType.EMPTY:
+			continue
+
+		# Target gets the overlay, source provides the art
+		var target_pos: Vector2i = card1_pos if target_is_card1 else card2_pos
+		var source_pos: Vector2i = card2_pos if target_is_card1 else card1_pos
+		var source_type: int = card2_type if target_is_card1 else card1_type
+
+		if not TileDatabase.has_edge_overlay(source_type):
+			continue
+		var edge_sid: int = edge_source_ids.get(source_type, -1)
+		if edge_sid < 0:
+			continue
+		var block_offset: Vector2i = TileDatabase.autotile_textures[source_type]["block_offset"]
+
+		# Source tile's overall shape context: check all 4 cardinal neighbors
+		var src_n: bool = world_data.get_tile(source_pos + Vector2i(0, -1)) != TileDatabase.TileType.EMPTY
+		var src_s: bool = world_data.get_tile(source_pos + Vector2i(0, 1)) != TileDatabase.TileType.EMPTY
+		var src_e: bool = world_data.get_tile(source_pos + Vector2i(1, 0)) != TileDatabase.TileType.EMPTY
+		var src_w: bool = world_data.get_tile(source_pos + Vector2i(-1, 0)) != TileDatabase.TileType.EMPTY
+		var has_vertical: bool = src_n or src_s
+		var has_horizontal: bool = src_e or src_w
+		var corner_coords: Vector2i = TileDatabase.get_corner_coords_contextual(corner_name, has_vertical, has_horizontal) + block_offset
+		_place_overlay_on_cell(target_pos, edge_sid, corner_coords, layer_name)
 
 	# Outer corner checks
 	# An outer corner exists when this empty cell has two adjacent cardinal neighbors
@@ -933,7 +1017,14 @@ func _calculate_cell_overlays(empty_pos: Vector2i) -> void:
 			if edge_sid < 0:
 				continue
 			var block_offset: Vector2i = TileDatabase.autotile_textures[diag_type]["block_offset"]
-			var corner_coords: Vector2i = TileDatabase.get_corner_coords(corner_name, empty_pos) + block_offset
+			# Source tile's overall shape context: check all 4 cardinal neighbors
+			var src_n: bool = world_data.get_tile(diag_pos + Vector2i(0, -1)) != TileDatabase.TileType.EMPTY
+			var src_s: bool = world_data.get_tile(diag_pos + Vector2i(0, 1)) != TileDatabase.TileType.EMPTY
+			var src_e: bool = world_data.get_tile(diag_pos + Vector2i(1, 0)) != TileDatabase.TileType.EMPTY
+			var src_w: bool = world_data.get_tile(diag_pos + Vector2i(-1, 0)) != TileDatabase.TileType.EMPTY
+			var has_vertical: bool = src_n or src_s
+			var has_horizontal: bool = src_e or src_w
+			var corner_coords: Vector2i = TileDatabase.get_corner_coords_contextual(corner_name, has_vertical, has_horizontal) + block_offset
 			_place_overlay_on_cell(empty_pos, edge_sid, corner_coords, layer_name)
 
 
@@ -1330,7 +1421,7 @@ func _get_debug_cell_info(target: Vector2i) -> String:
 		var chunk_layers: Dictionary = active_chunks[chunk_coord]
 		var local_pos: Vector2i = target - WorldData.chunk_to_world(chunk_coord)
 		var actual_lines: Array = []
-		for layer_name in ["edge_floor", "edge_wall_l", "edge_wall_r", "edge_ceiling"]:
+		for layer_name in ["edge_floor", "edge_wall_l", "edge_wall_r", "edge_ceiling", "corner_se", "corner_sw", "corner_ne", "corner_nw"]:
 			var layer: TileMapLayer = chunk_layers.get(layer_name, null)
 			if layer and layer.get_cell_source_id(local_pos) != -1:
 				var atlas: Vector2i = layer.get_cell_atlas_coords(local_pos)
@@ -1390,10 +1481,10 @@ func _debug_scan_empty_cell(empty_pos: Vector2i) -> Array:
 
 	# Inner corners
 	var diag_checks: Array = [
-		[Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), "SE", "edge_floor"],
-		[Vector2i(1, -1), Vector2i(0, -1), Vector2i(1, 0), "SW", "edge_wall_r"],
-		[Vector2i(-1, 1), Vector2i(0, 1), Vector2i(-1, 0), "NE", "edge_wall_l"],
-		[Vector2i(1, 1), Vector2i(0, 1), Vector2i(1, 0), "NW", "edge_ceiling"],
+		[Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), "SE", "corner_se"],
+		[Vector2i(1, -1), Vector2i(0, -1), Vector2i(1, 0), "SW", "corner_sw"],
+		[Vector2i(-1, 1), Vector2i(0, 1), Vector2i(-1, 0), "NE", "corner_ne"],
+		[Vector2i(1, 1), Vector2i(0, 1), Vector2i(1, 0), "NW", "corner_nw"],
 	]
 
 	for check in diag_checks:
@@ -1417,6 +1508,52 @@ func _debug_scan_empty_cell(empty_pos: Vector2i) -> Array:
 			var inner_coords: Vector2i = TileDatabase.get_inner_corner_overlay_coords(corner_name, empty_pos)
 			var d_name: String = TileDatabase.get_properties(diag_type).get("name", "?")
 			results.append("Inner %s from %s -> (%d,%d) [%s]" % [corner_name, d_name, inner_coords.x, inner_coords.y, layer_name])
+
+	# L-shape corners (pushed to solid neighbor cells)
+	var lshape_checks_dbg: Array = [
+		# [card1_offset, card2_offset, diag_offset, target_is_card1, corner_name, layer_name]
+		[Vector2i(0, -1), Vector2i(1, 0), Vector2i(1, -1), true, "TL", "edge_floor"],
+		[Vector2i(0, -1), Vector2i(-1, 0), Vector2i(-1, -1), true, "TR", "edge_wall_r"],
+		[Vector2i(0, 1), Vector2i(1, 0), Vector2i(1, 1), false, "TR", "edge_wall_r"],
+		[Vector2i(0, 1), Vector2i(-1, 0), Vector2i(-1, 1), false, "TL", "edge_floor"],
+	]
+
+	for check in lshape_checks_dbg:
+		var card1_offset: Vector2i = check[0]
+		var card2_offset: Vector2i = check[1]
+		var diag_offset: Vector2i = check[2]
+		var target_is_card1: bool = check[3]
+		var corner_name: String = check[4]
+		var layer_name: String = check[5]
+
+		var card1_pos: Vector2i = empty_pos + card1_offset
+		var card2_pos: Vector2i = empty_pos + card2_offset
+
+		var card1_type: int = world_data.get_tile(card1_pos)
+		var card2_type: int = world_data.get_tile(card2_pos)
+		var diag_type: int = world_data.get_tile(empty_pos + diag_offset)
+
+		if card1_type == TileDatabase.TileType.EMPTY or card2_type == TileDatabase.TileType.EMPTY:
+			continue
+		if diag_type != TileDatabase.TileType.EMPTY:
+			continue
+
+		var target_pos: Vector2i = card1_pos if target_is_card1 else card2_pos
+		var source_pos: Vector2i = card2_pos if target_is_card1 else card1_pos
+		var source_type: int = card2_type if target_is_card1 else card1_type
+
+		if not TileDatabase.has_edge_overlay(source_type):
+			continue
+		# Source tile's overall shape context (same logic as _calculate_cell_overlays)
+		var src_n: bool = world_data.get_tile(source_pos + Vector2i(0, -1)) != TileDatabase.TileType.EMPTY
+		var src_s: bool = world_data.get_tile(source_pos + Vector2i(0, 1)) != TileDatabase.TileType.EMPTY
+		var src_e: bool = world_data.get_tile(source_pos + Vector2i(1, 0)) != TileDatabase.TileType.EMPTY
+		var src_w: bool = world_data.get_tile(source_pos + Vector2i(-1, 0)) != TileDatabase.TileType.EMPTY
+		var has_vertical: bool = src_n or src_s
+		var has_horizontal: bool = src_e or src_w
+		var corner_coords: Vector2i = TileDatabase.get_corner_coords_contextual(corner_name, has_vertical, has_horizontal)
+		var s_name: String = TileDatabase.get_properties(source_type).get("name", "?")
+		results.append("L-shape %s: %s -> pushes to (%d,%d) [%s]" % [corner_name, s_name, target_pos.x, target_pos.y, layer_name])
 
 	# Outer corners
 	var outer_checks: Array = [
@@ -1444,7 +1581,14 @@ func _debug_scan_empty_cell(empty_pos: Vector2i) -> Array:
 		var adj2_type: int = world_data.get_tile(empty_pos + adj2_offset)
 
 		if adj1_type == TileDatabase.TileType.EMPTY and adj2_type == TileDatabase.TileType.EMPTY:
-			var corner_coords: Vector2i = TileDatabase.get_corner_coords(corner_name, empty_pos)
+			# Source tile's overall shape context (same logic as _calculate_cell_overlays)
+			var src_n: bool = world_data.get_tile(diag_pos + Vector2i(0, -1)) != TileDatabase.TileType.EMPTY
+			var src_s: bool = world_data.get_tile(diag_pos + Vector2i(0, 1)) != TileDatabase.TileType.EMPTY
+			var src_e: bool = world_data.get_tile(diag_pos + Vector2i(1, 0)) != TileDatabase.TileType.EMPTY
+			var src_w: bool = world_data.get_tile(diag_pos + Vector2i(-1, 0)) != TileDatabase.TileType.EMPTY
+			var has_vertical: bool = src_n or src_s
+			var has_horizontal: bool = src_e or src_w
+			var corner_coords: Vector2i = TileDatabase.get_corner_coords_contextual(corner_name, has_vertical, has_horizontal)
 			var d_name: String = TileDatabase.get_properties(diag_type).get("name", "?")
 			results.append("Corner %s from %s -> (%d,%d) [%s]" % [corner_name, d_name, corner_coords.x, corner_coords.y, layer_name])
 

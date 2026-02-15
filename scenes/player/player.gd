@@ -78,20 +78,13 @@ var _distance_initialized: bool = false
 
 # --- Camera zoom ---
 
-## Current zoom level (1.0 = default, 3.0 = max zoom in).
-var _camera_zoom: float = 1.0
+## Discrete pixel-perfect zoom levels.
+## 0.5x = 1 screen px per game px (wide), 1.0x = 2:1 (default),
+## 1.5x = 3:1 (medium close), 2.0x = 4:1 (detail).
+const ZOOM_LEVELS: Array[float] = [1.0, 2.0, 3.0]
 
-## Minimum zoom (zoomed out — current default).
-const CAMERA_ZOOM_MIN: float = 1.0
-
-## Maximum zoom (zoomed in).
-const CAMERA_ZOOM_MAX: float = 3.0
-
-## How much each scroll tick changes zoom.
-const CAMERA_ZOOM_STEP: float = 0.1
-
-## Zoom interpolation speed.
-const CAMERA_ZOOM_SMOOTH: float = 10.0
+## Current index into ZOOM_LEVELS (default = 0 → 1.0x zoom).
+var _zoom_index: int = 0
 
 # --- Animation ---
 
@@ -155,6 +148,9 @@ func _ready() -> void:
 	if camera:
 		camera.reset_smoothing()
 
+	# Apply the default zoom level immediately.
+	_camera.zoom = Vector2(ZOOM_LEVELS[_zoom_index], ZOOM_LEVELS[_zoom_index])
+
 	# Listen for hotbar changes from InputManager.
 	InputManager.hotbar_changed.connect(_on_hotbar_changed)
 
@@ -185,16 +181,15 @@ func _physics_process(delta: float) -> void:
 	_update_animation_state()
 	_advance_animation(delta)
 
-	_camera.zoom = _camera.zoom.lerp(Vector2(_camera_zoom, _camera_zoom), CAMERA_ZOOM_SMOOTH * delta)
-
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		if event.pressed:
-			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				_camera_zoom = clampf(_camera_zoom + CAMERA_ZOOM_STEP, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
-			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				_camera_zoom = clampf(_camera_zoom - CAMERA_ZOOM_STEP, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom_index = mini(_zoom_index + 1, ZOOM_LEVELS.size() - 1)
+			_camera.zoom = Vector2(ZOOM_LEVELS[_zoom_index], ZOOM_LEVELS[_zoom_index])
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom_index = maxi(_zoom_index - 1, 0)
+			_camera.zoom = Vector2(ZOOM_LEVELS[_zoom_index], ZOOM_LEVELS[_zoom_index])
 
 
 # --- Debug fly mode ---
