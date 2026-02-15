@@ -39,8 +39,20 @@ const TORCH_FALLOFF_POWER: float = 1.4
 ## Minimum ambient light level deep underground.
 const AMBIENT_FLOOR: float = 0.03
 
+## Z-index for the base tile layer.
+const BASE_Z_INDEX: int = 0
+## Z-index for floor (top) edge overlays.
+const EDGE_FLOOR_Z_INDEX: int = 1
+## Z-index for left wall edge overlays.
+const EDGE_WALL_L_Z_INDEX: int = 2
+## Z-index for right wall edge overlays.
+const EDGE_WALL_R_Z_INDEX: int = 3
+## Z-index for ceiling (bottom) edge overlays.
+const EDGE_CEILING_Z_INDEX: int = 4
+## Z-index for the player character.
+const PLAYER_Z_INDEX: int = 5
 ## Z-index for darkness overlay sprites (above terrain).
-const DARKNESS_Z_INDEX: int = 5
+const DARKNESS_Z_INDEX: int = 7
 
 ## Z-index for torch sprites (above darkness overlay).
 const TORCH_SPRITE_Z_INDEX: int = -1
@@ -54,11 +66,15 @@ var world_generator: WorldGenerator
 ## Structure placement system.
 var structure_placer: StructurePlacer
 
-## Active (loaded) chunks: chunk_coord (Vector2i) -> TileMapLayer node.
+## Active (loaded) chunks: chunk_coord (Vector2i) -> Dictionary of layer nodes.
+## Each value is {"base": TileMapLayer, ...} (edge layers added later).
 var active_chunks: Dictionary = {}
 
 ## The shared TileSet used by all chunk TileMapLayers.
 var shared_tileset: TileSet
+
+## Edge overlay atlas source IDs per tile type (no collision). TileType -> source_id.
+var edge_source_ids: Dictionary = {}
 
 ## Player's current chunk coordinate. Initialized to an impossible value
 ## so the first _process always triggers a load.
@@ -94,6 +110,9 @@ var collision_polygon: PackedVector2Array
 
 ## Whether this is the first frame (force-load all chunks synchronously).
 var _first_load: bool = true
+
+## Skip edge overlay population during first-load (handled in bulk after all chunks are created).
+var _skip_edge_overlays: bool = false
 
 ## Emitted when a chunk is loaded into the scene.
 signal chunk_loaded(chunk_coord: Vector2i)
@@ -131,6 +150,12 @@ func _ready() -> void:
 
 	# Build the shared tileset (programmatic atlas with all tile types)
 	shared_tileset = _build_tileset()
+
+	# Detect which tile types have edge overlay art (scans textures)
+	_detect_edge_capable_types()
+
+	# Initialize variant noise for deterministic tile variation
+	TileDatabase.initialize_variant_noise(GameState.world_seed)
 
 	# Register world data and generator with GameServer and GameState
 	GameServer.initialize_world(world_data)
@@ -179,16 +204,23 @@ func _process(_delta: float) -> void:
 
 	# Process generation queue
 	if _first_load:
+		_skip_edge_overlays = true
 		# Force-load all chunks synchronously on first frame (no pop-in on game load)
 		# Phase 1: Generate all chunk data first (so neighbors exist for bitmasks)
 		for chunk_coord in chunks_to_generate:
 			if _is_chunk_needed(chunk_coord):
 				_generate_chunk_data(chunk_coord)
-		# Phase 2: Create visuals (bitmasks can now see all neighbor data)
+		# Phase 2: Create base visuals (bitmasks can now see all neighbor data)
 		while chunks_to_generate.size() > 0:
 			var chunk_coord: Vector2i = chunks_to_generate.pop_front()
 			if _is_chunk_needed(chunk_coord):
 				_create_chunk_visuals(chunk_coord)
+		# Phase 3: Populate edge overlays (all chunks now have base data)
+		_skip_edge_overlays = false
+		for chunk_coord in active_chunks:
+			_populate_chunk_edge_overlays(chunk_coord)
+		for chunk_coord in active_chunks:
+			_update_neighbor_edge_overlays(chunk_coord)
 		_first_load = false
 		initial_load_complete.emit()
 	else:
@@ -197,6 +229,9 @@ func _process(_delta: float) -> void:
 
 	# Track max depth for BehaviorTracker
 	_update_depth_tracking()
+
+	# Debug hover panel update
+	_debug_process(_delta)
 
 
 # --- Chunk loading / unloading ---
@@ -295,7 +330,22 @@ func _create_chunk_visuals(chunk_coord: Vector2i) -> void:
 				tilemap.set_cell(Vector2i(x, y), visual["source_id"], visual["atlas_coords"])
 
 	add_child(tilemap)
-	active_chunks[chunk_coord] = tilemap
+	active_chunks[chunk_coord] = {"base": tilemap}
+
+	# Create edge overlay TileMapLayers (no collision)
+	var edge_layer_names: Array = ["edge_floor", "edge_wall_l", "edge_wall_r", "edge_ceiling"]
+	var edge_z_values: Array = [EDGE_FLOOR_Z_INDEX, EDGE_WALL_L_Z_INDEX, EDGE_WALL_R_Z_INDEX, EDGE_CEILING_Z_INDEX]
+
+	for i in range(edge_layer_names.size()):
+		var edge_layer := TileMapLayer.new()
+		edge_layer.name = "Chunk_%d_%d_%s" % [chunk_coord.x, chunk_coord.y, edge_layer_names[i]]
+		edge_layer.tile_set = shared_tileset
+		edge_layer.position = Vector2(chunk_coord.x * PIXEL_CHUNK_SIZE, chunk_coord.y * PIXEL_CHUNK_SIZE)
+		edge_layer.collision_enabled = false
+		edge_layer.z_index = edge_z_values[i]
+		add_child(edge_layer)
+		active_chunks[chunk_coord][edge_layer_names[i]] = edge_layer
+
 	chunk_loaded.emit(chunk_coord)
 
 	# Spawn torches for this chunk
@@ -305,6 +355,11 @@ func _create_chunk_visuals(chunk_coord: Vector2i) -> void:
 
 	# Create per-tile darkness overlay for this chunk
 	_create_darkness_overlay(chunk_coord)
+
+	# Populate edge overlays (skipped during first-load; handled in bulk there)
+	if not _skip_edge_overlays:
+		_populate_chunk_edge_overlays(chunk_coord)
+		_update_neighbor_edge_overlays(chunk_coord)
 
 
 ## Generate (if needed) and load a chunk into the scene tree.
@@ -335,10 +390,17 @@ func _unload_chunk(chunk_coord: Vector2i) -> void:
 			active_torches[tpos].queue_free()
 			active_torches.erase(tpos)
 
-	var tilemap: TileMapLayer = active_chunks[chunk_coord]
-	tilemap.queue_free()
+	var chunk_layers: Dictionary = active_chunks[chunk_coord]
+	for layer_key in chunk_layers:
+		chunk_layers[layer_key].queue_free()
 	active_chunks.erase(chunk_coord)
 	chunk_unloaded.emit(chunk_coord)
+
+
+## Get the base TileMapLayer for a chunk.
+func _get_base_tilemap(chunk_coord: Vector2i) -> TileMapLayer:
+	var chunk_data: Dictionary = active_chunks.get(chunk_coord, {})
+	return chunk_data.get("base", null)
 
 
 # --- Structure placement ---
@@ -380,10 +442,10 @@ func _apply_structure_tiles_to_chunk(chunk_coord: Vector2i) -> void:
 func _on_tile_mined(world_pos: Vector2i, tile_type: int, _tool_used: String) -> void:
 	# Update the visual tilemap
 	var chunk_coord: Vector2i = WorldData.world_to_chunk(world_pos)
-	if active_chunks.has(chunk_coord):
-		var tilemap: TileMapLayer = active_chunks[chunk_coord]
+	var base_tilemap: TileMapLayer = _get_base_tilemap(chunk_coord)
+	if base_tilemap:
 		var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
-		tilemap.erase_cell(local_pos)
+		base_tilemap.erase_cell(local_pos)
 
 	# Spawn dropped item
 	_spawn_dropped_item(world_pos, tile_type)
@@ -391,18 +453,24 @@ func _on_tile_mined(world_pos: Vector2i, tile_type: int, _tool_used: String) -> 
 	# Update neighbor visuals (they may now have exposed edges)
 	_update_neighbor_visuals(world_pos)
 
+	# Update edge overlays for this tile and neighbors
+	_update_edge_overlays_around(world_pos)
+
 
 ## Called when a tile is placed via GameServer. Update the visual tilemap.
 func _on_tile_placed(world_pos: Vector2i, tile_type: int) -> void:
 	var chunk_coord: Vector2i = WorldData.world_to_chunk(world_pos)
-	if active_chunks.has(chunk_coord):
-		var tilemap: TileMapLayer = active_chunks[chunk_coord]
+	var base_tilemap: TileMapLayer = _get_base_tilemap(chunk_coord)
+	if base_tilemap:
 		var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
 		var visual: Dictionary = _get_tile_visual(world_pos, tile_type)
-		tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
+		base_tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
 
 	# Update neighbor visuals (they may need to lose exposed edges)
 	_update_neighbor_visuals(world_pos)
+
+	# Update edge overlays for this tile and neighbors
+	_update_edge_overlays_around(world_pos)
 
 
 ## Spawn a dropped item at the world position of a mined tile.
@@ -449,6 +517,11 @@ func _build_tileset() -> TileSet:
 	var next_source_id: int = 1
 	for tile_type in TileDatabase.autotile_textures:
 		_add_autotile_source(ts, tile_type, next_source_id)
+		next_source_id += 1
+
+	# Edge overlay sources (same textures, NO collision)
+	for tile_type in TileDatabase.autotile_textures:
+		_add_edge_overlay_source(ts, tile_type, next_source_id)
 		next_source_id += 1
 
 	return ts
@@ -506,32 +579,98 @@ func _add_autotile_source(ts: TileSet, tile_type: int, source_id: int) -> void:
 	# Store source ID back in TileDatabase for runtime lookup
 	TileDatabase.autotile_source_ids[tile_type] = source_id
 
-	# Create tiles for all 13 autotile variants
-	# 9 from BITMASK_TO_ATLAS + 4 from INNER_CORNER_ATLAS
-	var created_coords: Dictionary = {}  # Avoid duplicates (center appears multiple times in bitmask table)
+	# Create tiles for all base autotile positions (rows 0-8, cols 0-15).
+	# Covers bitmask positions, variant positions, and any other base-layer cells.
+	var created_coords: Dictionary = {}
+	var tex_size: Vector2 = texture.get_size()
 
-	for bitmask_coords in TileDatabase.BITMASK_TO_ATLAS.values():
-		var coords: Vector2i = bitmask_coords + block_offset
-		if not created_coords.has(coords):
-			atlas.create_tile(coords)
-			var td: TileData = atlas.get_tile_data(coords, 0)
-			if tile_type != TileDatabase.TileType.WATER:
-				td.add_collision_polygon(0)
-				td.set_collision_polygon_points(0, 0, collision_polygon)
-			created_coords[coords] = true
+	for row in range(9):
+		for col in range(16):
+			var coords := Vector2i(col, row) + block_offset
+			var px: int = coords.x * TILE_SIZE
+			var py: int = coords.y * TILE_SIZE
+			if px + TILE_SIZE <= int(tex_size.x) and py + TILE_SIZE <= int(tex_size.y):
+				if not created_coords.has(coords):
+					atlas.create_tile(coords)
+					var td: TileData = atlas.get_tile_data(coords, 0)
+					if tile_type != TileDatabase.TileType.WATER:
+						td.add_collision_polygon(0)
+						td.set_collision_polygon_points(0, 0, collision_polygon)
+					created_coords[coords] = true
 
-	for corner_coords in TileDatabase.INNER_CORNER_ATLAS.values():
-		var coords: Vector2i = corner_coords + block_offset
-		if not created_coords.has(coords):
-			atlas.create_tile(coords)
-			var td: TileData = atlas.get_tile_data(coords, 0)
-			if tile_type != TileDatabase.TileType.WATER:
-				td.add_collision_polygon(0)
-				td.set_collision_polygon_points(0, 0, collision_polygon)
-			created_coords[coords] = true
-
-	print("[ChunkManager] Autotile source %d registered for %s (%d variants)" % [
+	print("[ChunkManager] Autotile source %d registered for %s (%d tiles)" % [
 		source_id, TileDatabase.get_properties(tile_type).get("name", "Unknown"), created_coords.size()])
+
+
+## Add edge overlay tiles as a separate atlas source (NO collision).
+func _add_edge_overlay_source(ts: TileSet, tile_type: int, source_id: int) -> void:
+	var autotile_info: Dictionary = TileDatabase.autotile_textures[tile_type]
+	var texture: Texture2D = load(autotile_info["path"])
+	var block_offset: Vector2i = autotile_info["block_offset"]
+
+	var atlas := TileSetAtlasSource.new()
+	atlas.texture = texture
+	atlas.texture_region_size = Vector2i(TILE_SIZE, TILE_SIZE)
+	ts.add_source(atlas, source_id)
+
+	edge_source_ids[tile_type] = source_id
+
+	# Create tiles for edge overlay atlas (rows 0-8, cols 0-15). NO collision.
+	var created: Dictionary = {}
+	var tex_size: Vector2 = texture.get_size()
+
+	for row in range(9):
+		for col in range(16):
+			var coords := Vector2i(col, row) + block_offset
+			var px: int = coords.x * TILE_SIZE
+			var py: int = coords.y * TILE_SIZE
+			if px + TILE_SIZE <= int(tex_size.x) and py + TILE_SIZE <= int(tex_size.y):
+				if not created.has(coords):
+					atlas.create_tile(coords)
+					created[coords] = true
+
+	print("[ChunkManager] Edge overlay source %d: %d tiles for %s" % [
+		source_id, created.size(),
+		TileDatabase.get_properties(tile_type).get("name", "Unknown")])
+
+
+## Scan edge overlay positions to auto-detect which tile types have edge overlay art.
+## Checks the center variant (context key 3 = both perpendiculars filled) for each
+## direction in EDGE_CONTEXT_ATLAS for non-transparent pixels.
+func _detect_edge_capable_types() -> void:
+	for tile_type in TileDatabase.autotile_textures:
+		var info: Dictionary = TileDatabase.autotile_textures[tile_type]
+		var texture: Texture2D = load(info["path"])
+		var img: Image = texture.get_image()
+		var block_offset: Vector2i = info["block_offset"]
+		var has_edges: bool = false
+
+		# Check center variant (context key 3) of each edge direction for non-transparent pixels
+		for dir in TileDatabase.EDGE_CONTEXT_ATLAS:
+			if has_edges:
+				break
+			var context_map: Dictionary = TileDatabase.EDGE_CONTEXT_ATLAS[dir]
+			if not context_map.has(3):
+				continue
+			var coords: Vector2i = context_map[3] + block_offset
+			var px: int = coords.x * TILE_SIZE
+			var py: int = coords.y * TILE_SIZE
+			if px + TILE_SIZE > img.get_width() or py + TILE_SIZE > img.get_height():
+				continue
+			for x in range(TILE_SIZE):
+				if has_edges:
+					break
+				for y in range(TILE_SIZE):
+					if img.get_pixel(px + x, py + y).a > 0.01:
+						has_edges = true
+						break
+
+		TileDatabase.edge_capable_types[tile_type] = has_edges
+		var type_name: String = TileDatabase.get_properties(tile_type).get("name", "Unknown")
+		if has_edges:
+			print("[ChunkManager] %s: edge capable (edge overlays detected)" % type_name)
+		else:
+			print("[ChunkManager] %s: using legacy autotile (no edge overlays)" % type_name)
 
 
 ## Simple pixel-position hash for tile texture variation.
@@ -582,14 +721,6 @@ func _get_tile_visual(world_pos: Vector2i, tile_type: int) -> Dictionary:
 	var bitmask: int = _calc_bitmask(world_pos)
 	var atlas_coords: Vector2i = TileDatabase.BITMASK_TO_ATLAS[bitmask] + block_offset
 
-	# When fully surrounded, check diagonals for inner corners
-	if bitmask == 15:
-		for corner_name in TileDatabase.INNER_CORNER_ATLAS:
-			var diag_pos: Vector2i = world_pos + DIAGONAL_OFFSETS[corner_name]
-			if world_data.get_tile(diag_pos) == TileDatabase.TileType.EMPTY:
-				atlas_coords = TileDatabase.INNER_CORNER_ATLAS[corner_name] + block_offset
-				break  # First missing diagonal wins
-
 	return {
 		"source_id": source_id,
 		"atlas_coords": atlas_coords,
@@ -613,13 +744,250 @@ func _update_neighbor_visuals(center_pos: Vector2i) -> void:
 ## Recalculate and update the visual for a single tile.
 func _update_single_tile_visual(world_pos: Vector2i, tile_type: int) -> void:
 	var chunk_coord: Vector2i = WorldData.world_to_chunk(world_pos)
-	if not active_chunks.has(chunk_coord):
+	var tilemap: TileMapLayer = _get_base_tilemap(chunk_coord)
+	if tilemap == null:
 		return
 
-	var tilemap: TileMapLayer = active_chunks[chunk_coord]
 	var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
 	var visual: Dictionary = _get_tile_visual(world_pos, tile_type)
 	tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
+
+
+# --- Edge overlay rendering ---
+
+## Place an overlay tile on a specific world position's overlay layer.
+## Handles cross-chunk placement (overlay may be on a different chunk's layer).
+func _place_overlay_on_cell(world_pos: Vector2i, source_id: int, atlas_coords: Vector2i, layer_name: String) -> void:
+	var target_chunk: Vector2i = WorldData.world_to_chunk(world_pos)
+	if not active_chunks.has(target_chunk):
+		return
+	var chunk_layers: Dictionary = active_chunks[target_chunk]
+	var layer: TileMapLayer = chunk_layers.get(layer_name, null)
+	if layer == null:
+		return
+	var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(target_chunk)
+	layer.set_cell(local_pos, source_id, atlas_coords)
+
+
+## Clear all edge overlay cells at a world position across all 4 overlay layers.
+func _clear_overlays_at(world_pos: Vector2i) -> void:
+	var chunk_coord: Vector2i = WorldData.world_to_chunk(world_pos)
+	if not active_chunks.has(chunk_coord):
+		return
+	var chunk_layers: Dictionary = active_chunks[chunk_coord]
+	var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
+	for layer_name in ["edge_floor", "edge_wall_l", "edge_wall_r", "edge_ceiling"]:
+		var layer: TileMapLayer = chunk_layers.get(layer_name, null)
+		if layer:
+			layer.erase_cell(local_pos)
+
+
+func _update_edge_overlays_around(center_pos: Vector2i) -> void:
+	# Use 5x5 area (radius 2) to ensure overlays from tiles 2 cells away
+	# that extend into the affected zone are properly recalculated.
+	var all_positions: Array = []
+	for dx in range(-2, 3):
+		for dy in range(-2, 3):
+			all_positions.append(center_pos + Vector2i(dx, dy))
+
+	# Clear overlays on all affected positions
+	for pos in all_positions:
+		_clear_overlays_at(pos)
+
+	# Recalculate overlays for empty cells only
+	for pos in all_positions:
+		if world_data.get_tile(pos) == TileDatabase.TileType.EMPTY:
+			_calculate_cell_overlays(pos)
+
+
+## Calculate and place edge overlays for a single EMPTY cell.
+## Checks all 4 cardinal neighbors for solid tiles and pulls their edge art.
+## Each direction can use a different tile type's atlas (multi-material support).
+func _calculate_cell_overlays(empty_pos: Vector2i) -> void:
+	# Cardinal directions: check each neighbor for solid tiles
+	# If solid, place that tile's edge overlay on this empty cell
+	var cardinal_checks: Array = [
+		# [direction_of_neighbor, edge_direction, layer, perp_offset1, perp_offset2]
+		# If N neighbor is solid -> its BOTTOM edge goes on this cell
+		[Vector2i(0, -1), TileDatabase.EdgeDir.BOTTOM, "edge_ceiling",
+		 Vector2i(1, 0), Vector2i(-1, 0)],  # perp E, W of the source tile
+		# If S neighbor is solid -> its TOP edge goes on this cell
+		[Vector2i(0, 1), TileDatabase.EdgeDir.TOP, "edge_floor",
+		 Vector2i(1, 0), Vector2i(-1, 0)],  # perp E, W
+		# If E neighbor is solid -> its LEFT edge goes on this cell
+		[Vector2i(1, 0), TileDatabase.EdgeDir.LEFT, "edge_wall_l",
+		 Vector2i(0, 1), Vector2i(0, -1)],  # perp S, N
+		# If W neighbor is solid -> its RIGHT edge goes on this cell
+		[Vector2i(-1, 0), TileDatabase.EdgeDir.RIGHT, "edge_wall_r",
+		 Vector2i(0, 1), Vector2i(0, -1)],  # perp S, N
+	]
+
+	for check in cardinal_checks:
+		var neighbor_offset: Vector2i = check[0]
+		var edge_dir: int = check[1]
+		var layer_name: String = check[2]
+		var perp1_offset: Vector2i = check[3]
+		var perp2_offset: Vector2i = check[4]
+
+		var neighbor_pos: Vector2i = empty_pos + neighbor_offset
+		var tile_type: int = world_data.get_tile(neighbor_pos)
+		if tile_type == TileDatabase.TileType.EMPTY:
+			continue
+		if not TileDatabase.has_edge_overlay(tile_type):
+			continue
+
+		var edge_sid: int = edge_source_ids.get(tile_type, -1)
+		if edge_sid < 0:
+			continue
+		var block_offset: Vector2i = TileDatabase.autotile_textures[tile_type]["block_offset"]
+
+		# Determine context from the source tile's perpendicular and parallel neighbors
+		var perp1_filled: bool = world_data.get_tile(neighbor_pos + perp1_offset) != TileDatabase.TileType.EMPTY
+		var perp2_filled: bool = world_data.get_tile(neighbor_pos + perp2_offset) != TileDatabase.TileType.EMPTY
+		var parallel_filled: bool = world_data.get_tile(neighbor_pos + neighbor_offset) != TileDatabase.TileType.EMPTY
+
+		var edge_coords: Vector2i = TileDatabase.get_edge_coords(edge_dir, perp1_filled, perp2_filled, parallel_filled)
+		_place_overlay_on_cell(empty_pos, edge_sid, edge_coords + block_offset, layer_name)
+
+	# Diagonal checks for inner corner decorations
+	# An inner corner exists when this empty cell has two adjacent cardinal neighbors
+	# that are BOTH solid, AND the diagonal tile between them is also solid.
+	# Each corner uses a layer based on its visual quadrant. The opposite cardinal
+	# being empty guarantees that layer is free; if it's solid, the edge overwrites
+	# the inner corner (acceptable — inner corners are decorative).
+	var diag_checks: Array = [
+		# [diag_offset, adj1_offset, adj2_offset, corner_name, layer]
+		# TL of cell: solid at NW, N+W solid. edge_floor free if S empty.
+		[Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), "SE", "edge_floor"],
+		# TR of cell: solid at NE, N+E solid. edge_wall_r free if W empty.
+		[Vector2i(1, -1), Vector2i(0, -1), Vector2i(1, 0), "SW", "edge_wall_r"],
+		# BL of cell: solid at SW, S+W solid. edge_wall_l free if E empty.
+		[Vector2i(-1, 1), Vector2i(0, 1), Vector2i(-1, 0), "NE", "edge_wall_l"],
+		# BR of cell: solid at SE, S+E solid. edge_ceiling free if N empty.
+		[Vector2i(1, 1), Vector2i(0, 1), Vector2i(1, 0), "NW", "edge_ceiling"],
+	]
+
+	for check in diag_checks:
+		var diag_offset: Vector2i = check[0]
+		var adj1_offset: Vector2i = check[1]
+		var adj2_offset: Vector2i = check[2]
+		var corner_name: String = check[3]
+		var layer_name: String = check[4]
+
+		var diag_pos: Vector2i = empty_pos + diag_offset
+		var diag_type: int = world_data.get_tile(diag_pos)
+		if diag_type == TileDatabase.TileType.EMPTY:
+			continue
+		if not TileDatabase.has_edge_overlay(diag_type):
+			continue
+
+		var adj1_type: int = world_data.get_tile(empty_pos + adj1_offset)
+		var adj2_type: int = world_data.get_tile(empty_pos + adj2_offset)
+
+		# Inner corner: both adjacent cardinals are solid
+		if adj1_type != TileDatabase.TileType.EMPTY and adj2_type != TileDatabase.TileType.EMPTY:
+			var edge_sid: int = edge_source_ids.get(diag_type, -1)
+			if edge_sid < 0:
+				continue
+			var block_offset: Vector2i = TileDatabase.autotile_textures[diag_type]["block_offset"]
+			var corner_coords: Vector2i = TileDatabase.get_inner_corner_overlay_coords(corner_name, empty_pos) + block_offset
+			_place_overlay_on_cell(empty_pos, edge_sid, corner_coords, layer_name)
+
+	# Outer corner checks
+	# An outer corner exists when this empty cell has two adjacent cardinal neighbors
+	# that are BOTH empty, but the diagonal tile is solid.
+	# Each corner uses a guaranteed-free layer (the empty cardinal = no edge on that layer).
+	# All 4 corners land on different layers, so no overwrites even with 4 diagonal neighbors.
+	var outer_checks: Array = [
+		# [diag_to_solid_tile, adj1_must_be_empty, adj2_must_be_empty, corner_name, layer]
+		# TL corner: solid at SE, E+S empty → edge_floor free (S empty = no floor edge)
+		[Vector2i(1, 1), Vector2i(1, 0), Vector2i(0, 1), "TL", "edge_floor"],
+		# TR corner: solid at SW, W+S empty → edge_wall_r free (W empty = no wall_r edge)
+		[Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(0, 1), "TR", "edge_wall_r"],
+		# BL corner: solid at NE, E+N empty → edge_wall_l free (E empty = no wall_l edge)
+		[Vector2i(1, -1), Vector2i(1, 0), Vector2i(0, -1), "BL", "edge_wall_l"],
+		# BR corner: solid at NW, W+N empty → edge_ceiling free (N empty = no ceiling edge)
+		[Vector2i(-1, -1), Vector2i(-1, 0), Vector2i(0, -1), "BR", "edge_ceiling"],
+	]
+
+	for check in outer_checks:
+		var diag_offset: Vector2i = check[0]
+		var adj1_offset: Vector2i = check[1]
+		var adj2_offset: Vector2i = check[2]
+		var corner_name: String = check[3]
+		var layer_name: String = check[4]
+
+		var diag_pos: Vector2i = empty_pos + diag_offset
+		var diag_type: int = world_data.get_tile(diag_pos)
+		if diag_type == TileDatabase.TileType.EMPTY:
+			continue
+		if not TileDatabase.has_edge_overlay(diag_type):
+			continue
+
+		var adj1_type: int = world_data.get_tile(empty_pos + adj1_offset)
+		var adj2_type: int = world_data.get_tile(empty_pos + adj2_offset)
+
+		# Outer corner: both adjacent cardinals are also empty
+		if adj1_type == TileDatabase.TileType.EMPTY and adj2_type == TileDatabase.TileType.EMPTY:
+			var edge_sid: int = edge_source_ids.get(diag_type, -1)
+			if edge_sid < 0:
+				continue
+			var block_offset: Vector2i = TileDatabase.autotile_textures[diag_type]["block_offset"]
+			var corner_coords: Vector2i = TileDatabase.get_corner_coords(corner_name, empty_pos) + block_offset
+			_place_overlay_on_cell(empty_pos, edge_sid, corner_coords, layer_name)
+
+
+## Populate all edge overlays for an entire chunk.
+func _populate_chunk_edge_overlays(chunk_coord: Vector2i) -> void:
+	var origin: Vector2i = WorldData.chunk_to_world(chunk_coord)
+	for x in range(CHUNK_SIZE):
+		for y in range(CHUNK_SIZE):
+			var wpos: Vector2i = origin + Vector2i(x, y)
+			if world_data.get_tile(wpos) == TileDatabase.TileType.EMPTY:
+				_calculate_cell_overlays(wpos)
+
+
+## Update edge overlays from neighboring chunks that may extend into this chunk.
+func _update_neighbor_edge_overlays(chunk_coord: Vector2i) -> void:
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var neighbor_chunk := Vector2i(chunk_coord.x + dx, chunk_coord.y + dy)
+			if not active_chunks.has(neighbor_chunk):
+				continue
+			var border_positions: Array = _get_border_positions(neighbor_chunk, chunk_coord)
+			for wpos in border_positions:
+				if world_data.get_tile(wpos) == TileDatabase.TileType.EMPTY:
+					_calculate_cell_overlays(wpos)
+
+
+## Get tile positions along the edge of source_chunk that face target_chunk.
+func _get_border_positions(source_chunk: Vector2i, target_chunk: Vector2i) -> Array:
+	var result: Array = []
+	var origin: Vector2i = WorldData.chunk_to_world(source_chunk)
+	var diff: Vector2i = target_chunk - source_chunk
+
+	if diff.x == 1:
+		for y in range(CHUNK_SIZE):
+			result.append(origin + Vector2i(CHUNK_SIZE - 1, y))
+	elif diff.x == -1:
+		for y in range(CHUNK_SIZE):
+			result.append(origin + Vector2i(0, y))
+
+	if diff.y == 1:
+		for x in range(CHUNK_SIZE):
+			result.append(origin + Vector2i(x, CHUNK_SIZE - 1))
+	elif diff.y == -1:
+		for x in range(CHUNK_SIZE):
+			result.append(origin + Vector2i(x, 0))
+
+	if diff.x != 0 and diff.y != 0:
+		var cx: int = CHUNK_SIZE - 1 if diff.x == 1 else 0
+		var cy: int = CHUNK_SIZE - 1 if diff.y == 1 else 0
+		result.append(origin + Vector2i(cx, cy))
+
+	return result
 
 
 # --- Per-tile lighting ---
@@ -824,11 +1192,11 @@ func _on_torch_removed(world_pos: Vector2i) -> void:
 
 # --- Utility ---
 
-## Get the TileMapLayer for the chunk containing a world tile position.
+## Get the base TileMapLayer for the chunk containing a world tile position.
 ## Returns null if the chunk is not currently loaded.
 func get_tilemap_at(world_pos: Vector2i) -> TileMapLayer:
 	var chunk_coord: Vector2i = WorldData.world_to_chunk(world_pos)
-	return active_chunks.get(chunk_coord, null)
+	return _get_base_tilemap(chunk_coord)
 
 
 ## Convert a pixel position to a tile coordinate.
@@ -839,3 +1207,245 @@ func world_to_tile(pixel_pos: Vector2) -> Vector2i:
 ## Convert a tile coordinate to the pixel position of its center.
 func tile_to_world_center(tile_pos: Vector2i) -> Vector2:
 	return Vector2(tile_pos.x * TILE_SIZE + TILE_SIZE / 2.0, tile_pos.y * TILE_SIZE + TILE_SIZE / 2.0)
+
+
+# --- Debug edge overlay labels ---
+
+var _debug_edge_labels: bool = false
+var _debug_canvas: CanvasLayer = null
+var _debug_panel: PanelContainer = null
+var _debug_label: Label = null
+var _debug_highlight: Line2D = null
+var _debug_last_cell: Vector2i = Vector2i(999999, 999999)
+
+
+## Handle F9 input to toggle debug edge labels.
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == 4194340:  # F9
+			_toggle_debug_edge_labels()
+
+
+## Toggle the debug edge label overlay on/off.
+func _toggle_debug_edge_labels() -> void:
+	_debug_edge_labels = !_debug_edge_labels
+	if _debug_edge_labels:
+		# Info panel (screen space via CanvasLayer, always crisp)
+		_debug_canvas = CanvasLayer.new()
+		_debug_canvas.layer = 100
+		add_child(_debug_canvas)
+
+		_debug_panel = PanelContainer.new()
+		_debug_panel.position = Vector2(10, 10)
+		_debug_canvas.add_child(_debug_panel)
+
+		_debug_label = Label.new()
+		_debug_label.text = "Hover over a cell (F9 to close)"
+		_debug_label.add_theme_font_size_override("font_size", 14)
+		_debug_label.add_theme_color_override("font_color", Color.WHITE)
+		_debug_panel.add_child(_debug_label)
+
+		# Cell highlight (world space)
+		_debug_highlight = Line2D.new()
+		_debug_highlight.width = 2.0
+		_debug_highlight.default_color = Color(1, 1, 0, 0.8)
+		_debug_highlight.closed = true
+		_debug_highlight.points = PackedVector2Array([
+			Vector2(0, 0), Vector2(TILE_SIZE, 0),
+			Vector2(TILE_SIZE, TILE_SIZE), Vector2(0, TILE_SIZE),
+		])
+		_debug_highlight.z_index = 20
+		add_child(_debug_highlight)
+
+		_debug_last_cell = Vector2i(999999, 999999)
+		print("[Debug] Edge overlay hover ON (F9 to toggle)")
+	else:
+		if _debug_canvas:
+			_debug_canvas.queue_free()
+			_debug_canvas = null
+			_debug_panel = null
+			_debug_label = null
+		if _debug_highlight:
+			_debug_highlight.queue_free()
+			_debug_highlight = null
+		print("[Debug] Edge overlay hover OFF")
+
+
+## Update hover debug panel each frame (only recalculates when mouse moves to a new cell).
+func _debug_process(_delta: float) -> void:
+	if not _debug_edge_labels or not _debug_label:
+		return
+
+	var viewport: Viewport = get_viewport()
+	var canvas_xform: Transform2D = viewport.get_canvas_transform()
+	var mouse_world: Vector2 = canvas_xform.affine_inverse() * viewport.get_mouse_position()
+	var cell := Vector2i(int(floor(mouse_world.x / TILE_SIZE)), int(floor(mouse_world.y / TILE_SIZE)))
+
+	if cell == _debug_last_cell:
+		return
+	_debug_last_cell = cell
+
+	# Update highlight position
+	_debug_highlight.position = Vector2(cell.x * TILE_SIZE, cell.y * TILE_SIZE)
+
+	# Build info for this cell
+	_debug_label.text = _get_debug_cell_info(cell)
+
+
+## Build a multi-line debug string describing a single cell's tile, overlays, and actual placed tiles.
+## For solid tiles: shows bitmask and atlas coords.
+## For empty cells: shows what _calculate_cell_overlays would produce (pulled from neighbors).
+func _get_debug_cell_info(target: Vector2i) -> String:
+	var lines: Array = []
+	var tile_type: int = world_data.get_tile(target)
+
+	lines.append("Cell: (%d, %d)" % [target.x, target.y])
+
+	if tile_type != TileDatabase.TileType.EMPTY:
+		var props: Dictionary = TileDatabase.get_properties(tile_type)
+		lines.append("Tile: %s" % props.get("name", "Unknown"))
+		if TileDatabase.has_autotile(tile_type):
+			var bitmask: int = _calc_bitmask(target)
+			var block_offset: Vector2i = TileDatabase.autotile_textures[tile_type]["block_offset"]
+			var atlas_coords: Vector2i = TileDatabase.BITMASK_TO_ATLAS[bitmask] + block_offset
+			lines.append("Bitmask: %d  Atlas: (%d,%d)" % [bitmask, atlas_coords.x, atlas_coords.y])
+		lines.append("")
+		lines.append("(Solid tile - no overlays here)")
+	else:
+		lines.append("EMPTY")
+		lines.append("")
+
+		# Scan from this empty cell's perspective (mirrors _calculate_cell_overlays logic)
+		var overlay_lines: Array = _debug_scan_empty_cell(target)
+		if overlay_lines.size() > 0:
+			lines.append("Overlays on this cell:")
+			for entry in overlay_lines:
+				lines.append("  " + entry)
+		else:
+			lines.append("No overlays")
+
+	# Also show what's ACTUALLY placed on overlay layers
+	var chunk_coord: Vector2i = WorldData.world_to_chunk(target)
+	if active_chunks.has(chunk_coord):
+		var chunk_layers: Dictionary = active_chunks[chunk_coord]
+		var local_pos: Vector2i = target - WorldData.chunk_to_world(chunk_coord)
+		var actual_lines: Array = []
+		for layer_name in ["edge_floor", "edge_wall_l", "edge_wall_r", "edge_ceiling"]:
+			var layer: TileMapLayer = chunk_layers.get(layer_name, null)
+			if layer and layer.get_cell_source_id(local_pos) != -1:
+				var atlas: Vector2i = layer.get_cell_atlas_coords(local_pos)
+				actual_lines.append("  %s: (%d,%d)" % [layer_name, atlas.x, atlas.y])
+		if actual_lines.size() > 0:
+			lines.append("")
+			lines.append("Actual placed tiles:")
+			for line in actual_lines:
+				lines.append(line)
+
+	return "\n".join(lines)
+
+
+## Scan an empty cell for debug overlay info. Mirrors _calculate_cell_overlays() logic
+## but returns label strings instead of placing tiles.
+func _debug_scan_empty_cell(empty_pos: Vector2i) -> Array:
+	var results: Array = []
+	var dir_labels: Dictionary = {
+		TileDatabase.EdgeDir.TOP: "Top",
+		TileDatabase.EdgeDir.RIGHT: "Right",
+		TileDatabase.EdgeDir.BOTTOM: "Bottom",
+		TileDatabase.EdgeDir.LEFT: "Left",
+	}
+
+	# Cardinal edges: check each neighbor for solid tiles
+	var cardinal_checks: Array = [
+		[Vector2i(0, -1), TileDatabase.EdgeDir.BOTTOM, "edge_ceiling",
+		 Vector2i(1, 0), Vector2i(-1, 0)],
+		[Vector2i(0, 1), TileDatabase.EdgeDir.TOP, "edge_floor",
+		 Vector2i(1, 0), Vector2i(-1, 0)],
+		[Vector2i(1, 0), TileDatabase.EdgeDir.LEFT, "edge_wall_l",
+		 Vector2i(0, 1), Vector2i(0, -1)],
+		[Vector2i(-1, 0), TileDatabase.EdgeDir.RIGHT, "edge_wall_r",
+		 Vector2i(0, 1), Vector2i(0, -1)],
+	]
+
+	for check in cardinal_checks:
+		var neighbor_offset: Vector2i = check[0]
+		var edge_dir: int = check[1]
+		var layer_name: String = check[2]
+		var perp1_offset: Vector2i = check[3]
+		var perp2_offset: Vector2i = check[4]
+
+		var neighbor_pos: Vector2i = empty_pos + neighbor_offset
+		var n_type: int = world_data.get_tile(neighbor_pos)
+		if n_type == TileDatabase.TileType.EMPTY:
+			continue
+		if not TileDatabase.has_edge_overlay(n_type):
+			continue
+
+		var perp1_filled: bool = world_data.get_tile(neighbor_pos + perp1_offset) != TileDatabase.TileType.EMPTY
+		var perp2_filled: bool = world_data.get_tile(neighbor_pos + perp2_offset) != TileDatabase.TileType.EMPTY
+		var parallel_filled: bool = world_data.get_tile(neighbor_pos + neighbor_offset) != TileDatabase.TileType.EMPTY
+		var edge_coords: Vector2i = TileDatabase.get_edge_coords(edge_dir, perp1_filled, perp2_filled, parallel_filled)
+		var n_name: String = TileDatabase.get_properties(n_type).get("name", "?")
+		results.append("%s Edge from %s -> (%d,%d) [%s]" % [dir_labels[edge_dir], n_name, edge_coords.x, edge_coords.y, layer_name])
+
+	# Inner corners
+	var diag_checks: Array = [
+		[Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), "SE", "edge_floor"],
+		[Vector2i(1, -1), Vector2i(0, -1), Vector2i(1, 0), "SW", "edge_wall_r"],
+		[Vector2i(-1, 1), Vector2i(0, 1), Vector2i(-1, 0), "NE", "edge_wall_l"],
+		[Vector2i(1, 1), Vector2i(0, 1), Vector2i(1, 0), "NW", "edge_ceiling"],
+	]
+
+	for check in diag_checks:
+		var diag_offset: Vector2i = check[0]
+		var adj1_offset: Vector2i = check[1]
+		var adj2_offset: Vector2i = check[2]
+		var corner_name: String = check[3]
+		var layer_name: String = check[4]
+
+		var diag_pos: Vector2i = empty_pos + diag_offset
+		var diag_type: int = world_data.get_tile(diag_pos)
+		if diag_type == TileDatabase.TileType.EMPTY:
+			continue
+		if not TileDatabase.has_edge_overlay(diag_type):
+			continue
+
+		var adj1_type: int = world_data.get_tile(empty_pos + adj1_offset)
+		var adj2_type: int = world_data.get_tile(empty_pos + adj2_offset)
+
+		if adj1_type != TileDatabase.TileType.EMPTY and adj2_type != TileDatabase.TileType.EMPTY:
+			var inner_coords: Vector2i = TileDatabase.get_inner_corner_overlay_coords(corner_name, empty_pos)
+			var d_name: String = TileDatabase.get_properties(diag_type).get("name", "?")
+			results.append("Inner %s from %s -> (%d,%d) [%s]" % [corner_name, d_name, inner_coords.x, inner_coords.y, layer_name])
+
+	# Outer corners
+	var outer_checks: Array = [
+		[Vector2i(1, 1), Vector2i(1, 0), Vector2i(0, 1), "TL", "edge_floor"],
+		[Vector2i(-1, 1), Vector2i(-1, 0), Vector2i(0, 1), "TR", "edge_wall_r"],
+		[Vector2i(1, -1), Vector2i(1, 0), Vector2i(0, -1), "BL", "edge_wall_l"],
+		[Vector2i(-1, -1), Vector2i(-1, 0), Vector2i(0, -1), "BR", "edge_ceiling"],
+	]
+
+	for check in outer_checks:
+		var diag_offset: Vector2i = check[0]
+		var adj1_offset: Vector2i = check[1]
+		var adj2_offset: Vector2i = check[2]
+		var corner_name: String = check[3]
+		var layer_name: String = check[4]
+
+		var diag_pos: Vector2i = empty_pos + diag_offset
+		var diag_type: int = world_data.get_tile(diag_pos)
+		if diag_type == TileDatabase.TileType.EMPTY:
+			continue
+		if not TileDatabase.has_edge_overlay(diag_type):
+			continue
+
+		var adj1_type: int = world_data.get_tile(empty_pos + adj1_offset)
+		var adj2_type: int = world_data.get_tile(empty_pos + adj2_offset)
+
+		if adj1_type == TileDatabase.TileType.EMPTY and adj2_type == TileDatabase.TileType.EMPTY:
+			var corner_coords: Vector2i = TileDatabase.get_corner_coords(corner_name, empty_pos)
+			var d_name: String = TileDatabase.get_properties(diag_type).get("name", "?")
+			results.append("Corner %s from %s -> (%d,%d) [%s]" % [corner_name, d_name, corner_coords.x, corner_coords.y, layer_name])
+
+	return results

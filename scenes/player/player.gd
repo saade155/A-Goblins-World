@@ -56,14 +56,95 @@ var _is_jumping: bool = false
 ## Tracks whether we were on the floor last frame (for coyote time edge detection).
 var _was_on_floor: bool = false
 
+# --- Debug fly mode ---
+
+## When true, gravity is disabled and the player can move freely in all directions.
+var debug_fly: bool = false
+
+## Movement speed in fly mode (pixels/sec).
+var _fly_speed: float = 400.0
+
+## Saved collision layer before entering fly mode (restored on exit).
+var _saved_collision_layer: int = 0
+
+## Saved collision mask before entering fly mode (restored on exit).
+var _saved_collision_mask: int = 0
+
 ## Last known position for distance tracking.
 var _last_position: Vector2 = Vector2.ZERO
 
 ## Whether we've initialized the last position yet.
 var _distance_initialized: bool = false
 
+# --- Camera zoom ---
+
+## Current zoom level (1.0 = default, 3.0 = max zoom in).
+var _camera_zoom: float = 1.0
+
+## Minimum zoom (zoomed out — current default).
+const CAMERA_ZOOM_MIN: float = 1.0
+
+## Maximum zoom (zoomed in).
+const CAMERA_ZOOM_MAX: float = 3.0
+
+## How much each scroll tick changes zoom.
+const CAMERA_ZOOM_STEP: float = 0.1
+
+## Zoom interpolation speed.
+const CAMERA_ZOOM_SMOOTH: float = 10.0
+
+# --- Animation ---
+
+## Number of columns in the sprite sheet.
+const SHEET_COLS: int = 10
+
+## Animation definitions: row on sheet, frame count, FPS, whether it loops.
+## Row map matches docs/sprite-sheet-spec.md.
+const ANIM_WALK := { "row": 0, "frames": 8, "fps": 14.0, "loop": true }
+const ANIM_RUN := { "row": 1, "frames": 8, "fps": 16.0, "loop": true }
+const ANIM_JUMP := { "row": 2, "frames": 8, "fps": 12.0, "loop": false }
+const ANIM_FALL := { "row": 2, "frames": 2, "fps": 6.0, "loop": true, "col_offset": 8 }
+const ANIM_IDLE := { "row": 3, "frames": 1, "fps": 1.0, "loop": false }
+const ANIM_IDLE_EAR := { "row": 4, "frames": 1, "fps": 1.0, "loop": false }
+const ANIM_IDLE_BLINK := { "row": 5, "frames": 1, "fps": 1.0, "loop": false }
+const ANIM_IDLE_FIDGET := { "row": 6, "frames": 1, "fps": 1.0, "loop": false }
+
+## Idle variant pool — randomly selected after idle timer expires.
+const IDLE_VARIANTS := [ANIM_IDLE_EAR, ANIM_IDLE_BLINK, ANIM_IDLE_FIDGET]
+
+## Seconds of standing still before a random idle variant plays.
+const IDLE_VARIANT_MIN_DELAY: float = 3.0
+const IDLE_VARIANT_MAX_DELAY: float = 6.0
+
+## Duration to hold an idle variant frame before returning to base idle.
+const IDLE_VARIANT_HOLD_TIME: float = 0.5
+
+## Current animation dictionary.
+var _current_anim: Dictionary = ANIM_IDLE
+
+## Current frame index within the animation.
+var _anim_frame: int = 0
+
+## Accumulator for frame timing.
+var _anim_timer: float = 0.0
+
+## Timer for idle variant triggering.
+var _idle_timer: float = 0.0
+
+## Time until next idle variant.
+var _idle_next_variant_time: float = 4.0
+
+## Whether we're currently showing an idle variant.
+var _idle_variant_active: bool = false
+
+## Timer for how long to hold the idle variant.
+var _idle_variant_hold_timer: float = 0.0
+
 ## Cached reference to the Sprite2D for flipping.
 @onready var _sprite: Sprite2D = $Sprite2D
+
+## Cached reference to the Camera2D for zoom control.
+@onready var _camera: Camera2D = $Camera2D
 
 func _ready() -> void:
 	# Register with GameState so other systems can find the player.
@@ -77,14 +158,22 @@ func _ready() -> void:
 	# Listen for hotbar changes from InputManager.
 	InputManager.hotbar_changed.connect(_on_hotbar_changed)
 
+	# Initialize idle variant timer with a random delay.
+	_reset_idle_timer()
+
 
 func _physics_process(delta: float) -> void:
-	_apply_gravity(delta)
-	_update_coyote_timer(delta)
-	_update_jump_buffer(delta)
-	_handle_jump()
-	_handle_horizontal_movement(delta)
-	_apply_variable_jump_gravity(delta)
+	_check_fly_toggle()
+
+	if debug_fly:
+		_handle_fly_movement()
+	else:
+		_apply_gravity(delta)
+		_update_coyote_timer(delta)
+		_update_jump_buffer(delta)
+		_handle_jump()
+		_handle_horizontal_movement(delta)
+		_apply_variable_jump_gravity(delta)
 
 	move_and_slide()
 
@@ -92,6 +181,62 @@ func _physics_process(delta: float) -> void:
 	_was_on_floor = is_on_floor()
 
 	_track_movement_distance()
+
+	_update_animation_state()
+	_advance_animation(delta)
+
+	_camera.zoom = _camera.zoom.lerp(Vector2(_camera_zoom, _camera_zoom), CAMERA_ZOOM_SMOOTH * delta)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		if event.pressed:
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_camera_zoom = clampf(_camera_zoom + CAMERA_ZOOM_STEP, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
+			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_camera_zoom = clampf(_camera_zoom - CAMERA_ZOOM_STEP, CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
+
+
+# --- Debug fly mode ---
+
+## Check if the fly-mode toggle was just pressed this frame and toggle state.
+func _check_fly_toggle() -> void:
+	if not InputManager.is_fly_toggle_just_pressed():
+		return
+
+	debug_fly = not debug_fly
+
+	if debug_fly:
+		# Save current collision settings and disable collisions.
+		_saved_collision_layer = collision_layer
+		_saved_collision_mask = collision_mask
+		collision_layer = 0
+		collision_mask = 0
+		velocity = Vector2.ZERO
+		print("[Debug] Fly mode: ON")
+	else:
+		# Restore collision settings.
+		collision_layer = _saved_collision_layer
+		collision_mask = _saved_collision_mask
+		velocity = Vector2.ZERO
+		print("[Debug] Fly mode: OFF")
+
+
+## Handle free movement in all four directions when fly mode is active.
+func _handle_fly_movement() -> void:
+	var h_dir := InputManager.get_movement_direction()
+	var v_dir := InputManager.get_fly_vertical_direction()
+	var direction := Vector2(h_dir, v_dir)
+
+	# Normalize so diagonal movement isn't faster.
+	if direction.length() > 1.0:
+		direction = direction.normalized()
+
+	velocity = direction * _fly_speed
+
+	# Flip sprite even in fly mode for visual consistency.
+	if h_dir != 0.0:
+		_sprite.flip_h = h_dir < 0.0
 
 
 # --- Movement ---
@@ -187,3 +332,99 @@ func _track_movement_distance() -> void:
 ## Delegates to GameServer which owns the hotbar state.
 func _on_hotbar_changed(slot: int) -> void:
 	GameServer.request_select_hotbar(slot)
+
+
+# --- Animation ---
+
+## Determine which animation should play based on current movement state.
+func _update_animation_state() -> void:
+	if debug_fly:
+		# In fly mode, just use walk anim if moving, idle if not.
+		var moving := velocity.length() > 10.0
+		if moving:
+			_play_anim(ANIM_WALK)
+		else:
+			_play_anim(ANIM_IDLE)
+		return
+
+	if not is_on_floor():
+		if velocity.y < 0.0:
+			_play_anim(ANIM_JUMP)
+		else:
+			_play_anim(ANIM_FALL)
+		return
+
+	var h_speed := absf(velocity.x)
+	if h_speed > 10.0:
+		# TODO: Use ANIM_RUN when sprint input is added.
+		_play_anim(ANIM_WALK)
+	else:
+		_handle_idle_state()
+
+
+## Handle idle state with random variant timer.
+func _handle_idle_state() -> void:
+	if _idle_variant_active:
+		# Currently showing a variant — check if hold time is done.
+		_idle_variant_hold_timer -= get_physics_process_delta_time()
+		if _idle_variant_hold_timer <= 0.0:
+			_idle_variant_active = false
+			_reset_idle_timer()
+			_play_anim(ANIM_IDLE)
+		return
+
+	# Base idle — count down to next variant.
+	if _current_anim != ANIM_IDLE:
+		_play_anim(ANIM_IDLE)
+		_reset_idle_timer()
+		return
+
+	_idle_timer += get_physics_process_delta_time()
+	if _idle_timer >= _idle_next_variant_time:
+		# Trigger a random idle variant.
+		var variant: Dictionary = IDLE_VARIANTS[randi() % IDLE_VARIANTS.size()]
+		_play_anim(variant)
+		_idle_variant_active = true
+		_idle_variant_hold_timer = IDLE_VARIANT_HOLD_TIME
+		_idle_timer = 0.0
+
+
+## Reset the idle variant timer with a random delay.
+func _reset_idle_timer() -> void:
+	_idle_timer = 0.0
+	_idle_next_variant_time = randf_range(IDLE_VARIANT_MIN_DELAY, IDLE_VARIANT_MAX_DELAY)
+
+
+## Switch to a new animation (resets frame if animation changed).
+func _play_anim(anim: Dictionary) -> void:
+	if _current_anim == anim:
+		return
+	_current_anim = anim
+	_anim_frame = 0
+	_anim_timer = 0.0
+	# Reset idle state when switching away from idle.
+	if anim != ANIM_IDLE and not _idle_variant_active:
+		_idle_timer = 0.0
+
+
+## Advance the animation frame timer and update the sprite.
+func _advance_animation(delta: float) -> void:
+	var anim := _current_anim
+	var frame_count: int = anim["frames"]
+
+	if frame_count > 1:
+		_anim_timer += delta
+		var frame_duration: float = 1.0 / float(anim["fps"])
+		while _anim_timer >= frame_duration:
+			_anim_timer -= frame_duration
+			_anim_frame += 1
+			if _anim_frame >= frame_count:
+				if anim.get("loop", false):
+					_anim_frame = 0
+				else:
+					_anim_frame = frame_count - 1  # Hold last frame.
+
+	# Calculate the sprite sheet frame index.
+	var col_offset: int = anim.get("col_offset", 0)
+	var sheet_frame: int = anim["row"] * SHEET_COLS + col_offset + _anim_frame
+	_sprite.frame = sheet_frame

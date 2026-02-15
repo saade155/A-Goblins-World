@@ -1,16 +1,15 @@
 [gd_scene load_steps=5 format=3 uid="uid://d0player00001"]
 
 [ext_resource type="Script" path="res://scenes/player/player.gd" id="1_player"]
+[ext_resource type="Texture2D" path="res://assets/characters/player_goblin_base.png" id="2_sprite"]
 [ext_resource type="PackedScene" path="res://scenes/player/mining_component.tscn" id="3_mining"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_1"]
 radius = 12.0
 height = 44.0
 
-[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_1"]
-size = Vector2(32, 48)
-
 [node name="Player" type="CharacterBody2D"]
+z_index = 5
 collision_layer = 2
 collision_mask = 1
 script = ExtResource("1_player")
@@ -19,8 +18,10 @@ script = ExtResource("1_player")
 shape = SubResource("CapsuleShape2D_1")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-self_modulate = Color(0.2, 0.75, 0.2, 1)
-texture = SubResource("PlaceholderTexture2D_1")
+texture = ExtResource("2_sprite")
+offset = Vector2(0, -2)
+hframes = 10
+vframes = 10
 
 [node name="Camera2D" type="Camera2D" parent="."]
 position_smoothing_enabled = true

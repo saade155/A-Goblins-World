@@ -1,116 +1,90 @@
-# Tile Edge & Ore Overlay System — Design
+# Tile Edge & Overlay System — Design (Revised)
 
 ## Problem
-The current autotile system uses a 4-bit cardinal bitmask + separate diagonal inner corner checks (20 tile variants). This doesn't scale to all combinations — tiles with edges + inner corners, opposite corner pairs, and other combos show incorrect visuals. A full 47-tile blob autotile would cover everything but requires significant art per tile type per biome.
+The current 20-variant bitmask autotile doesn't scale to all edge/corner combinations. A compositional overlay approach eliminates combinatorial explosion.
 
-## Current State (Working)
-- 16 cardinal bitmask variants + 4 inner corners = 20 tiles per type
-- Covers ~80% of cases correctly (all cardinal edges, single inner corners)
-- Breaks on: multiple inner corners, edge + inner corner combos, opposite corner pairs
-- Stone and dirt tiles have art; all others use procedural colored squares
+## Core Concept: Compositional Overlays
 
-## Rendering Layers (per chunk)
+Instead of baking edges into tile variants, edges are independent transparent overlays stacked on separate TileMapLayers. Inner corners form naturally where overlays overlap — no dedicated inner corner art needed (though materials can add them optionally).
 
-The system uses 3 overlay TileMapLayers on top of the existing base layer, plus torches and darkness:
+Each tile position has two tile layers:
+- **Foreground tile** — solid, collidable, mineable
+- **Background tile** — back wall, same material but darker/recessed, visible when foreground is mined
 
-```
-Torches          (Z=-1)  — torch sprites
-Base layer       (Z=0)   — interior tile fills, collision
-Edge overlay     (Z=1)   — tile edges/corners (renders behind player)
-Player           (Z=2)   — player z_index set to 2
-Ore overlay      (Z=3)   — ore protrusions extending into neighbor tiles (renders in front of player)
-Darkness         (Z=5)   — darkness/lighting overlay
-```
+Three visual outcomes per cell:
+1. **Foreground + background** — cut/irregular foreground edges reveal darker back wall (depth)
+2. **Background only** (foreground mined) — back wall visible, player can walk through
+3. **Neither** (both mined) — backdrop/sky/void shows through
 
-The edge overlay renders behind the player for natural depth. The ore overlay renders in front of the player so ore protrusions feel like they're jutting out of the cave walls toward the viewer.
+## Tile Variation
 
-## Edge Overlay System (Option A — Chosen)
+Each tile type has multiple interior fill variants (e.g., plain dirt, dirt with roots, dirt with pebbles). All variants are tileable with each other. Variant selection uses noise-based mapping for deterministic results that survive save/load without storing per-tile variant data.
 
-**Concept:** Tiles render as interior-only textures (center variant). Edges, corners, and depth effects are rendered as transparent overlays on the edge overlay layer (Z=1).
+## Edge Overlay System
 
-**How it works:**
-- Base layer (Z=0): every tile renders its center/interior texture (the tileable material)
-- Edge overlay layer (Z=1): overlays edge sprites on exposed faces
-- Each edge piece is a small transparent sprite showing the material edge treatment
-- Bitmask logic determines which edge pieces to place (same 8-neighbor check)
+**Per cardinal direction (top, bottom, left, right), two art pieces:**
+1. **Edge overlay** — placed on the empty neighbor cell (extends into open space)
+2. **Tile-side override** — placed on the tile's own cell (modifies the tile edge)
 
-**Art per tile type:**
-- 1 interior texture (tileable 32x32)
-- 4 cardinal edge strips (top, right, bottom, left — could be 32x32 with transparency)
-- 4 outer corner pieces
-- 4 inner corner pieces
-- = 13 edge pieces + 1 base = 14 total (similar to current but decoupled)
+Both are 32x32 transparent PNGs.
 
-**Advantages:**
-- Edges decouple from base texture — can swap edge style per biome without redrawing base material
-- Natural home for depth effects (floor lit faces, ceiling shadows, wall shading from art guidelines)
-- Building/structure edges use the same system with different edge art
-- Easy to add lighting/shadow hints to edges
-- Base tiles become trivially tileable (just the material texture, no edge variants)
+**4 overlay layers per chunk, rendered in priority order:**
 
-**Concerns:**
-- Additional TileMapLayer per chunk for edge rendering
-- Need to define edge sprite format and overlay positioning
-- Transparency blending at pixel art scale needs care
+| Layer | Z | Content | Draw Order |
+|-------|---|---------|------------|
+| Edge - Floor (top edges) | 1 | Floor edges drawn first | 1st |
+| Edge - Wall L (left edges) | 2 | Left wall edges | 2nd |
+| Edge - Wall R (right edges) | 3 | Right wall edges | 3rd |
+| Edge - Ceiling (bottom edges) | 4 | Ceiling edges drawn last (on top) | 4th |
 
-**Aligns with art guidelines:**
-- Layer model already defines depth faces (top edges = lit floor, bottom edges = shadowed ceiling)
-- "Same-type tile boundaries have organic, irregular edges" — overlay approach lets these be separate art pieces
-- Back wall tiles (darker recessed variants) could use same overlay system
+This priority ordering (floor → walls → ceiling) gives natural depth — ceiling edges occlude wall edges, wall edges occlude floor edges.
+
+**Inner corners:** Not needed for most materials — they form naturally from overlapping cardinal edge overlays. Materials that need explicit inner corners can add them as optional art pieces.
+
+**Outer corners:** Placed on the empty neighbor cell (diagonal), rendered on the appropriate overlay layer.
+
+## Full Rendering Stack
+
+| Layer | Z | Content |
+|-------|---|---------|
+| Background tiles | -2 | Back wall (darker material variant) |
+| Torches | -1 | Torch sprites |
+| Base tiles | 0 | Interior fill (with noise-selected variants), collision |
+| Edge - Floor | 1 | Top edge overlays + overrides |
+| Edge - Wall L | 2 | Left edge overlays + overrides |
+| Edge - Wall R | 3 | Right edge overlays + overrides |
+| Edge - Ceiling | 4 | Bottom edge overlays + overrides |
+| Player | 5 | Player z_index |
+| Ore overlay | 6 | Ore protrusions (in front of player) |
+| Darkness | 7 | Lighting overlay |
 
 ## Ore Overlay System
 
-**Concept:** Ore tiles (iron, gold, crystal, etc.) have protrusion sprites that extend beyond the 32x32 tile boundary into neighboring tiles. These render on the ore overlay layer (Z=3), in front of the player, creating visual depth — crystals and metal chunks poking out of cave walls toward the viewer.
+Unchanged from original design:
+- Ore tiles have protrusion sprites extending 4-8px beyond tile boundary into neighbors
+- Renders at Z=6 (in front of player) for physical depth
+- Vein-aware: only vein edges get protrusions (same ore neighbors = no protrusion)
+- Art per ore type: 4 cardinal protrusions minimum, corners optional
 
-**How it works:**
-- Ore tiles that form veins tile together properly; only vein edges get protrusion sprites
-- Same neighbor-detection logic as edge tiles but applied to ore types: check if neighbor is the same ore type
-- If neighbor is NOT the same ore type (i.e., this is a vein edge), place a protrusion sprite extending 4-8px into that neighbor
-- Protrusions overlay neighboring stone/dirt — they don't replace the neighbor tile
+## Art Per Tile Type (Starting with Stone)
 
-**Art per ore type:**
-- 4 cardinal protrusion strips (top, right, bottom, left)
-- 4 outer corner protrusion pieces (TL, TR, BL, BR)
-- 4 inner corner protrusion pieces (TL, TR, BL, BR)
-- = 12 protrusion pieces (or a simpler 4-cardinal subset to start)
-- Each piece is 32x32 with transparency, positioned on the neighboring tile's cell
-- Protrusions extend 4-8px from the ore boundary into the neighbor
+| Piece | Count | Description |
+|-------|-------|-------------|
+| Interior fill variants | 4+ | Tileable 32x32, noise-selected |
+| Edge overlays | 4 | Top, right, bottom, left (on neighbor cell) |
+| Tile-side overrides | 4 | Top, right, bottom, left (on own cell) |
+| Outer corners | 4 | Optional, on diagonal neighbor cell |
+| Inner corners | 0-4 | Optional per material, not needed for stone |
+| **Total** | **12-16** | Scales per material needs |
 
-**Visual effect:**
-- Iron ore: small metallic chunks poking into adjacent stone
-- Crystal ore: crystalline shards jutting into neighboring tiles
-- Gold ore: nugget clusters breaking the tile boundary
-- Renders in front of the player — creates a sense of the ore deposits having real physical presence
+## Ceiling Shadow (Deferred)
 
-**Vein-aware rendering:**
-- Two adjacent iron tiles: no protrusion between them (they're the same vein)
-- Iron tile next to stone tile: iron protrusion extends into the stone tile
-- This prevents veins from looking spiky internally while maintaining dramatic edges
+Global ceiling shadow (gradient overlay on empty cells below solid tiles) is deferred until the lighting system is more developed. Keeping it as a separate overlay (not baked into background variants) preserves flexibility for light interaction.
 
-## Option B: Quarter-Tile System (Rejected)
-
-**Concept:** Split each 32x32 tile into four 16x16 quadrants. Each quadrant independently selects from ~4 variants based on its 3 nearest neighbors (2 cardinals + 1 diagonal).
-
-**Why rejected:**
-- 4x the tile cells per chunk (64x64 instead of 32x32)
-- Doesn't naturally handle depth/lighting effects (would still need overlay for that)
-- The 3-layer overlay system handles edges, depth, and ore protrusions — quarter-tiles add redundant complexity
-
-Remains viable as a fallback if the overlay approach proves too complex or has performance issues.
-
-## Recommendation
-
-**Use the 3-layer system** because:
-1. The depth/floor/ceiling visual system from the art guidelines requires an overlay approach anyway
-2. Edge treatment is a natural part of that overlay — not a separate system
-3. Ore protrusions add significant visual richness with minimal additional complexity (same neighbor-detection logic)
-4. Base tiles simplify to just the tileable interior texture (less art, more reuse)
-5. Z-ordering gives clear visual layering: edges behind player, ore in front of player
-
-## Next Steps (When Ready)
-1. Design the edge sprite format (size, positioning, transparency approach)
-2. Design ore protrusion sprite format (extension distance, transparency)
-3. Prototype with stone tiles: center texture + 4 cardinal edge overlays
-4. Prototype with one ore type: protrusion sprites on vein edges
-5. Evaluate visual quality and performance with all 3 layers active
-6. Extend to depth effects (floor/ceiling/wall shading)
+## Next Steps
+1. Finalize stone tile art (interior variants + 8 edge pieces)
+2. Implement 4-layer edge overlay system in chunk_manager
+3. Add background tile layer
+4. Implement noise-based variant selection
+5. Test with stone, then extend to dirt and other materials
+6. Add ore protrusion system
