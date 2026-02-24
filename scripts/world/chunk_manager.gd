@@ -65,6 +65,12 @@ const DARKNESS_Z_INDEX: int = 11
 ## Z-index for torch sprites (above darkness overlay).
 const TORCH_SPRITE_Z_INDEX: int = -1
 
+## Autosave interval in seconds (10 minutes).
+const AUTOSAVE_INTERVAL: float = 600.0
+
+## Maximum number of rolling autosave snapshots to keep.
+const MAX_AUTOSAVES: int = 5
+
 ## The authoritative world data.
 var world_data: WorldData
 
@@ -113,8 +119,14 @@ var _torch_scene: PackedScene
 ## Active torch visual nodes. Key = world tile position, value = Node2D instance.
 var active_torches: Dictionary = {}
 
+## Saving overlay UI (small bottom-right indicator).
+var _saving_overlay: CanvasLayer
+
 ## Full-tile collision polygon for tileset tiles.
 var collision_polygon: PackedVector2Array
+
+## Timer for periodic autosaves.
+var _autosave_timer: Timer
 
 ## Whether this is the first frame (force-load all chunks synchronously).
 var _first_load: bool = true
@@ -146,10 +158,18 @@ func _ready() -> void:
 	if meta != null:
 		GameState.world_seed = meta["world_seed"]
 		GameState.start_depth = meta["start_depth"]
-		GameState.saved_player_position = Vector2(meta["player_position_x"], meta["player_position_y"])
 		GameState.world_display_name = meta.get("display_name", save_manager.world_name)
-		GameState.playtime_seconds = meta.get("playtime_seconds", 0.0)
+
+		# Load session state (position, inventory, playtime) from current/state.dat
+		var state = save_manager.load_state()
+		if state:
+			GameState.saved_player_position = Vector2(state.get("player_position_x", 0.0), state.get("player_position_y", 0.0))
+			GameState.playtime_seconds = state.get("playtime_seconds", 0.0)
+
 		print("[ChunkManager] Loaded world save. Seed: %d" % GameState.world_seed)
+	else:
+		# New world — write immutable metadata once
+		save_manager.save_world_meta(GameState.world_seed, GameState.start_depth, GameState.world_display_name)
 
 	# Initialize systems
 	world_data = WorldData.new()
@@ -195,6 +215,18 @@ func _ready() -> void:
 	# Intercept window close to save before quitting
 	get_tree().set_auto_accept_quit(false)
 
+	# Start autosave timer (10-minute rolling snapshots)
+	_autosave_timer = Timer.new()
+	_autosave_timer.wait_time = AUTOSAVE_INTERVAL
+	_autosave_timer.one_shot = false
+	_autosave_timer.timeout.connect(_on_autosave_timeout)
+	add_child(_autosave_timer)
+	_autosave_timer.start()
+
+	# Saving overlay (non-blocking bottom-right indicator)
+	_saving_overlay = preload("res://scenes/ui/saving_overlay.tscn").instantiate()
+	add_child(_saving_overlay)
+
 
 func _process(_delta: float) -> void:
 	if not GameState.player:
@@ -237,6 +269,12 @@ func _process(_delta: float) -> void:
 
 	# Track max depth for BehaviorTracker
 	_update_depth_tracking()
+
+	# Poll for background save completion
+	var save_result: Dictionary = save_manager.check_save_complete()
+	if not save_result.is_empty():
+		print("[ChunkManager] Snapshot complete: %s (success: %s)" % [save_result.save_name, str(save_result.success)])
+		_saving_overlay.hide_saving()
 
 	# Debug hover panel update
 	_debug_process(_delta)
@@ -1221,18 +1259,24 @@ func _update_depth_tracking() -> void:
 
 # --- Save / Exit ---
 
-## Save all dirty loaded chunks, world metadata, and behavior data.
-## Called before game exit.
-func save_all() -> void:
+## Flush all dirty chunks to current/ on disk. Does not save state or behavior.
+func _save_dirty_chunks() -> void:
 	for chunk_coord in active_chunks:
 		if world_data.is_chunk_dirty(chunk_coord):
 			save_manager.save_chunk(chunk_coord, world_data)
+			world_data.dirty_chunks[chunk_coord] = false
 
-	# Save world metadata
+
+## Save all dirty loaded chunks, world metadata, and behavior data.
+## Called before game exit.
+func save_all() -> void:
+	_save_dirty_chunks()
+
+	# Save session state (player position, inventory, playtime)
 	var player_pos := Vector2.ZERO
 	if GameState.player:
 		player_pos = GameState.player.global_position
-	save_manager.save_world_meta(GameState.world_seed, player_pos, GameState.start_depth, GameState.world_display_name, GameState.get_total_playtime())
+	save_manager.save_state(player_pos, GameState.get_total_playtime())
 
 	# Save behavior tracker data
 	save_manager.save_behavior_data(BehaviorTracker)
@@ -1240,8 +1284,66 @@ func save_all() -> void:
 	print("[ChunkManager] All data saved.")
 
 
+## Called when the autosave timer fires. Creates a rolling autosave snapshot.
+func _on_autosave_timeout() -> void:
+	if save_manager.is_saving():
+		return  # Skip this tick, will try again next interval
+
+	# Flush dirty chunks synchronously (they're small, writes to current/)
+	_save_dirty_chunks()
+	save_manager.save_behavior_data(BehaviorTracker)
+
+	# Rotate old autosaves to stay under the limit
+	save_manager.rotate_autosaves(MAX_AUTOSAVES)
+
+	# Timestamp-based autosave name (naturally sortable, no collision)
+	var save_name: String = "auto_%s" % Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
+
+	# Get player position
+	var player: Node = get_tree().get_first_node_in_group("player")
+	var player_pos: Vector2 = player.global_position if player else Vector2.ZERO
+
+	# Launch threaded snapshot
+	save_manager.create_snapshot(save_name, "autosave", player_pos, GameState.get_total_playtime())
+	_saving_overlay.show_saving()
+	print("[ChunkManager] Autosave started: %s" % save_name)
+
+
+## Create a manual save snapshot with the given name.
+func create_save(save_name: String, reason: String = "manual") -> void:
+	if save_manager.is_saving():
+		push_warning("[ChunkManager] Save already in progress")
+		return
+	_save_dirty_chunks()
+	save_manager.save_behavior_data(BehaviorTracker)
+	var player: Node = get_tree().get_first_node_in_group("player")
+	var player_pos: Vector2 = player.global_position if player else Vector2.ZERO
+	save_manager.create_snapshot(save_name, reason, player_pos, GameState.get_total_playtime())
+	_saving_overlay.show_saving()
+
+
+## Programmatic hook for event-triggered saves (future use by combat/exploration systems).
+func request_autosave(reason: String) -> void:
+	if save_manager.is_saving():
+		return
+	_save_dirty_chunks()
+	save_manager.save_behavior_data(BehaviorTracker)
+	save_manager.rotate_autosaves(MAX_AUTOSAVES)
+	var save_name: String = "auto_%s" % Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
+	var player: Node = get_tree().get_first_node_in_group("player")
+	var player_pos: Vector2 = player.global_position if player else Vector2.ZERO
+	save_manager.create_snapshot(save_name, reason, player_pos, GameState.get_total_playtime())
+	_saving_overlay.show_saving()
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		# If a background snapshot is running, wait for it to finish first.
+		if save_manager.is_saving():
+			var result: Dictionary = save_manager.check_save_complete()
+			while result.is_empty():
+				OS.delay_msec(10)
+				result = save_manager.check_save_complete()
 		save_all()
 		get_tree().quit()
 

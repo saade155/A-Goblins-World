@@ -47,6 +47,10 @@ signal hotbar_selection_changed(slot: int)
 ## Emitted when items could not be picked up (inventory full).
 signal inventory_full(item_id: String, amount: int)
 
+## Emitted to request an event-triggered autosave (e.g., after boss kill, biome entry).
+## ChunkManager listens and creates a rolling autosave snapshot.
+signal autosave_requested(reason: String)
+
 # --- World data ---
 
 ## Reference to the authoritative world data. Set by the world scene via initialize_world().

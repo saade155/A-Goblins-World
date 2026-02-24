@@ -60,6 +60,43 @@ func register_player(player_node: CharacterBody2D) -> void:
 		player_node.global_position = Vector2(0, start_depth * 32)
 		print("[GameState] Player registered at start_depth=%d (y=%d)" % [start_depth, start_depth * 32])
 
+	# Safety check: nudge up if spawning inside solid tiles
+	_ensure_safe_spawn(player_node)
+
+
+## If the player would spawn inside solid tiles, nudge upward to the nearest
+## 2-tile-tall open area. Falls back to spawn position if no air found.
+func _ensure_safe_spawn(player_node: CharacterBody2D) -> void:
+	if not world_data:
+		return
+
+	var tile_size: int = 32
+	var pos: Vector2 = player_node.global_position
+	# Convert pixel position to tile coordinates (player origin is at feet-ish area)
+	var tile_x: int = floori(pos.x / tile_size)
+	var tile_y: int = floori(pos.y / tile_size)
+
+	# Check if the two tiles at player position (feet + head) are clear
+	var feet_pos := Vector2i(tile_x, tile_y)
+	var head_pos := Vector2i(tile_x, tile_y - 1)
+
+	if not world_data.has_tile(feet_pos) and not world_data.has_tile(head_pos):
+		return  # Position is safe
+
+	# Scan upward for a 2-tile-tall gap (max 64 tiles to avoid infinite loop)
+	print("[GameState] Player spawn blocked by tiles at %s, scanning upward..." % str(feet_pos))
+	for offset in range(1, 64):
+		var check_feet := Vector2i(tile_x, tile_y - offset)
+		var check_head := Vector2i(tile_x, tile_y - offset - 1)
+		if not world_data.has_tile(check_feet) and not world_data.has_tile(check_head):
+			player_node.global_position = Vector2(pos.x, check_feet.y * tile_size)
+			print("[GameState] Player nudged to safe position: %s" % str(player_node.global_position))
+			return
+
+	# Fallback: spawn at start_depth surface
+	player_node.global_position = Vector2(0, start_depth * tile_size)
+	print("[GameState] Could not find safe position, falling back to spawn.")
+
 
 ## Unregister the player (e.g., on scene change or cleanup).
 func unregister_player() -> void:

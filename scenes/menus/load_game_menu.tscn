@@ -43,7 +43,8 @@ layout_mode = 2
 
 [node name="ScrollContainer" type="ScrollContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(500, 300)
+custom_minimum_size = Vector2(700, 300)
+horizontal_scroll_mode = 2
 
 [node name="SlotList" type="VBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/ScrollContainer"]
 unique_name_in_owner = true
