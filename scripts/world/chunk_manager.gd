@@ -211,6 +211,7 @@ func _ready() -> void:
 
 	# Load BehaviorTracker data if save exists
 	save_manager.load_behavior_data(BehaviorTracker)
+	save_manager.load_skill_data(SkillSystem)
 
 	# Intercept window close to save before quitting
 	get_tree().set_auto_accept_quit(false)
@@ -1280,6 +1281,7 @@ func save_all() -> void:
 
 	# Save behavior tracker data
 	save_manager.save_behavior_data(BehaviorTracker)
+	save_manager.save_skill_data(SkillSystem)
 
 	print("[ChunkManager] All data saved.")
 
@@ -1292,6 +1294,7 @@ func _on_autosave_timeout() -> void:
 	# Flush dirty chunks synchronously (they're small, writes to current/)
 	_save_dirty_chunks()
 	save_manager.save_behavior_data(BehaviorTracker)
+	save_manager.save_skill_data(SkillSystem)
 
 	# Rotate old autosaves to stay under the limit
 	save_manager.rotate_autosaves(MAX_AUTOSAVES)
@@ -1316,6 +1319,7 @@ func create_save(save_name: String, reason: String = "manual") -> void:
 		return
 	_save_dirty_chunks()
 	save_manager.save_behavior_data(BehaviorTracker)
+	save_manager.save_skill_data(SkillSystem)
 	var player: Node = get_tree().get_first_node_in_group("player")
 	var player_pos: Vector2 = player.global_position if player else Vector2.ZERO
 	save_manager.create_snapshot(save_name, reason, player_pos, GameState.get_total_playtime())
@@ -1328,6 +1332,7 @@ func request_autosave(reason: String) -> void:
 		return
 	_save_dirty_chunks()
 	save_manager.save_behavior_data(BehaviorTracker)
+	save_manager.save_skill_data(SkillSystem)
 	save_manager.rotate_autosaves(MAX_AUTOSAVES)
 	var save_name: String = "auto_%s" % Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
 	var player: Node = get_tree().get_first_node_in_group("player")

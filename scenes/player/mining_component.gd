@@ -93,7 +93,8 @@ func _process(delta: float) -> void:
 				target_hardness = TileDatabase.get_hardness(tile_type)
 
 			# Accumulate mining progress.
-			mine_progress += delta * base_mine_speed
+			var speed_bonus: float = SkillSystem.get_total_perk_effect("mining_speed")
+			mine_progress += delta * base_mine_speed * (1.0 + speed_bonus)
 
 			# Show progress indicator.
 			_progress_indicator.global_position = tile_world_center

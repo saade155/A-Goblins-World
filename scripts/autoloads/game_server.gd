@@ -120,6 +120,13 @@ func request_mine(player: Node, world_pos: Vector2i, tool_power: float) -> bool:
 	# Emit signal so the world scene can update visuals and spawn drops.
 	tile_mined.emit(world_pos, tile_type, "hand")  # tool_used is "hand" for now
 
+	# Skill system: bonus ore chance
+	var bonus_chance: float = SkillSystem.get_total_perk_effect("bonus_ore_chance")
+	if bonus_chance > 0.0 and randf() < bonus_chance:
+		var bonus_drop: Dictionary = TileDatabase.get_drop(tile_type)
+		if bonus_drop["item"] != "":
+			request_add_item(bonus_drop["item"], 1)
+
 	print("[GameServer] Tile mined at %s (type %d, power %.1f)" % [str(world_pos), tile_type, tool_power])
 	return true
 

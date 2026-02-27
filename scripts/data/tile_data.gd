@@ -42,6 +42,7 @@ var tile_properties: Dictionary = {
 	TileType.DIRT: {
 		"name": "Dirt",
 		"hardness": 1.0,
+		"difficulty_level": 2,
 		"drop_item": "dirt",
 		"drop_count": 1,
 		"color": Color(0.55, 0.35, 0.17),  # Brown
@@ -49,6 +50,7 @@ var tile_properties: Dictionary = {
 	TileType.STONE: {
 		"name": "Stone",
 		"hardness": 2.5,
+		"difficulty_level": 3,
 		"drop_item": "stone",
 		"drop_count": 1,
 		"color": Color(0.5, 0.5, 0.5),  # Gray
@@ -56,6 +58,7 @@ var tile_properties: Dictionary = {
 	TileType.IRON_ORE: {
 		"name": "Iron Ore",
 		"hardness": 4.0,
+		"difficulty_level": 4,
 		"drop_item": "iron_ore",
 		"drop_count": 1,
 		"color": Color(0.7, 0.5, 0.35),  # Rusty brown
@@ -63,6 +66,7 @@ var tile_properties: Dictionary = {
 	TileType.HARD_STONE: {
 		"name": "Hard Stone",
 		"hardness": 4.0,
+		"difficulty_level": 4,
 		"drop_item": "hard_stone",
 		"drop_count": 1,
 		"color": Color(0.45, 0.48, 0.58),  # Gray-blue
@@ -70,6 +74,7 @@ var tile_properties: Dictionary = {
 	TileType.COPPER_ORE: {
 		"name": "Copper Ore",
 		"hardness": 3.0,
+		"difficulty_level": 4,
 		"drop_item": "copper_ore",
 		"drop_count": 1,
 		"color": Color(0.7, 0.55, 0.3),  # Orange-green
@@ -77,6 +82,7 @@ var tile_properties: Dictionary = {
 	TileType.GOLD_ORE: {
 		"name": "Gold Ore",
 		"hardness": 5.0,
+		"difficulty_level": 5,
 		"drop_item": "gold_ore",
 		"drop_count": 1,
 		"color": Color(0.85, 0.75, 0.2),  # Yellow
@@ -84,6 +90,7 @@ var tile_properties: Dictionary = {
 	TileType.CRYSTAL: {
 		"name": "Crystal",
 		"hardness": 6.0,
+		"difficulty_level": 6,
 		"drop_item": "crystal",
 		"drop_count": 1,
 		"color": Color(0.3, 0.8, 0.75),  # Cyan/teal
@@ -91,6 +98,7 @@ var tile_properties: Dictionary = {
 	TileType.DEEP_ROCK: {
 		"name": "Deep Rock",
 		"hardness": 8.0,
+		"difficulty_level": 7,
 		"drop_item": "deep_rock",
 		"drop_count": 1,
 		"color": Color(0.35, 0.2, 0.45),  # Dark purple
@@ -98,6 +106,7 @@ var tile_properties: Dictionary = {
 	TileType.SAND: {
 		"name": "Sand",
 		"hardness": 0.5,
+		"difficulty_level": 1,
 		"drop_item": "sand",
 		"drop_count": 1,
 		"color": Color(0.85, 0.78, 0.55),
@@ -105,6 +114,7 @@ var tile_properties: Dictionary = {
 	TileType.SANDSTONE: {
 		"name": "Sandstone",
 		"hardness": 1.5,
+		"difficulty_level": 3,
 		"drop_item": "sandstone",
 		"drop_count": 1,
 		"color": Color(0.78, 0.65, 0.42),
@@ -112,6 +122,7 @@ var tile_properties: Dictionary = {
 	TileType.MUD: {
 		"name": "Mud",
 		"hardness": 0.7,
+		"difficulty_level": 2,
 		"drop_item": "mud",
 		"drop_count": 1,
 		"color": Color(0.35, 0.28, 0.18),
@@ -119,6 +130,7 @@ var tile_properties: Dictionary = {
 	TileType.MOSSY_STONE: {
 		"name": "Mossy Stone",
 		"hardness": 2.0,
+		"difficulty_level": 3,
 		"drop_item": "mossy_stone",
 		"drop_count": 1,
 		"color": Color(0.35, 0.55, 0.30),
@@ -126,6 +138,7 @@ var tile_properties: Dictionary = {
 	TileType.MYCELIUM: {
 		"name": "Mycelium",
 		"hardness": 1.2,
+		"difficulty_level": 3,
 		"drop_item": "mycelium",
 		"drop_count": 1,
 		"color": Color(0.60, 0.45, 0.65),
@@ -133,6 +146,7 @@ var tile_properties: Dictionary = {
 	TileType.VOLCANIC_ROCK: {
 		"name": "Volcanic Rock",
 		"hardness": 5.0,
+		"difficulty_level": 5,
 		"drop_item": "volcanic_rock",
 		"drop_count": 1,
 		"color": Color(0.3, 0.15, 0.1),
@@ -140,6 +154,7 @@ var tile_properties: Dictionary = {
 	TileType.OBSIDIAN: {
 		"name": "Obsidian",
 		"hardness": 10.0,
+		"difficulty_level": 8,
 		"drop_item": "obsidian",
 		"drop_count": 1,
 		"color": Color(0.1, 0.05, 0.15),
@@ -147,6 +162,7 @@ var tile_properties: Dictionary = {
 	TileType.ICE: {
 		"name": "Ice",
 		"hardness": 1.5,
+		"difficulty_level": 3,
 		"drop_item": "ice",
 		"drop_count": 1,
 		"color": Color(0.7, 0.85, 0.95),
@@ -154,6 +170,7 @@ var tile_properties: Dictionary = {
 	TileType.FROZEN_STONE: {
 		"name": "Frozen Stone",
 		"hardness": 3.5,
+		"difficulty_level": 4,
 		"drop_item": "frozen_stone",
 		"drop_count": 1,
 		"color": Color(0.5, 0.6, 0.75),
@@ -161,6 +178,7 @@ var tile_properties: Dictionary = {
 	TileType.RUBY_ORE: {
 		"name": "Ruby Ore",
 		"hardness": 6.0,
+		"difficulty_level": 6,
 		"drop_item": "ruby_ore",
 		"drop_count": 1,
 		"color": Color(0.8, 0.15, 0.2),
@@ -168,6 +186,7 @@ var tile_properties: Dictionary = {
 	TileType.EMERALD_ORE: {
 		"name": "Emerald Ore",
 		"hardness": 5.0,
+		"difficulty_level": 5,
 		"drop_item": "emerald_ore",
 		"drop_count": 1,
 		"color": Color(0.15, 0.7, 0.3),
@@ -175,6 +194,7 @@ var tile_properties: Dictionary = {
 	TileType.GRASS: {
 		"name": "Grass",
 		"hardness": 0.8,
+		"difficulty_level": 2,
 		"drop_item": "grass",
 		"drop_count": 1,
 		"color": Color(0.3, 0.65, 0.2),
@@ -182,6 +202,7 @@ var tile_properties: Dictionary = {
 	TileType.SNOW: {
 		"name": "Snow",
 		"hardness": 0.5,
+		"difficulty_level": 1,
 		"drop_item": "snow",
 		"drop_count": 1,
 		"color": Color(0.9, 0.93, 0.97),
@@ -189,6 +210,7 @@ var tile_properties: Dictionary = {
 	TileType.WATER: {
 		"name": "Water",
 		"hardness": 0.0,
+		"difficulty_level": 0,
 		"drop_item": "",
 		"drop_count": 0,
 		"color": Color(0.2, 0.4, 0.8),
@@ -196,6 +218,7 @@ var tile_properties: Dictionary = {
 	TileType.CLAY: {
 		"name": "Clay",
 		"hardness": 1.2,
+		"difficulty_level": 3,
 		"drop_item": "clay",
 		"drop_count": 1,
 		"color": Color(0.65, 0.45, 0.35),
@@ -405,6 +428,12 @@ func get_properties(tile_type: int) -> Dictionary:
 func get_hardness(tile_type: int) -> float:
 	var props := get_properties(tile_type)
 	return props.get("hardness", 0.0)
+
+
+## Get the difficulty level for a tile type (1-10 scale). Returns 0 for EMPTY/unknown.
+func get_difficulty(tile_type: int) -> int:
+	var props := get_properties(tile_type)
+	return props.get("difficulty_level", 0)
 
 
 ## Get the drop info for a tile type. Returns {"item": String, "count": int}.

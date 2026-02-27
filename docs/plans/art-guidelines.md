@@ -158,49 +158,110 @@ assets/tilesets/
 
 **Canvas:** 32×48 pixels per frame. Don't fill the entire canvas — leave a few pixels of padding on each side so animations have room to extend (like a pickaxe swing).
 
-**Facing:** Draw the goblin facing RIGHT. The engine flips horizontally for left-facing movement. Only draw one direction.
+**Facing:** Draw the goblin facing LEFT. The engine flips horizontally for right-facing movement. Only draw one direction.
 
-### Animation List (Priority Order)
+### Layered Sprite System
 
-Each animation is a separate Aseprite file. Frames go left to right on the timeline. Export as horizontal strip PNG.
+The goblin is composed of **7 body layers**, each exported as its own 320×480 sprite sheet (10 columns × 10 rows, 32×48 per frame). All layers share the same animation layout and are frame-synced at runtime.
 
-| # | Animation | Frames | Loop? | Description |
-|---|-----------|--------|-------|-------------|
-| 1 | **Idle** | 4–6 | Yes | Standing still. Subtle breathing (chest rises 1px), occasional blink. Plays most of the time. |
-| 2 | **Run** | 6–8 | Yes | Full run cycle. Arms and legs pumping. Head can bob 1px. Energetic but small. |
-| 3 | **Mine (swing)** | 6–8 | No | Pickaxe swing: wind-up (2f) → swing (2f) → impact (2f). CORE action — make it punchy. |
-| 4 | **Jump** | 2 | No | Rising pose: legs tucked, arms slightly up. Held frame while ascending. |
-| 5 | **Fall** | 2 | No | Falling pose: legs dangling, arms out. Different from jump. Held while descending. |
-| 6 | **Land** | 2–3 | No | Squash on landing: body compresses 1-2px, springs back. Quick, adds juice. |
-| 7 | **Hurt** | 3 | No | Knockback/flinch. Eyes shut. Plays briefly on damage. |
+| Layer | Z-Order | Equipment Slot | Notes |
+|-------|---------|---------------|-------|
+| Back arm | 0 | Arms (paired with front arm) | Behind body |
+| Back leg | 1 | Legs (paired with front leg) | Behind body |
+| Chest | 2 | Chest | Core torso |
+| Belt | 3 | Belt | Over chest |
+| Head | 4 | Head | Helmets, hoods |
+| Front leg | 5 | Legs (paired with back leg) | In front of body |
+| Front arm | 6 | Arms (paired with front arm) | In front of body |
 
-**Total first pass: ~30 frames.**
+**Equipment slots (6):** Head, Chest, Belt, Arms, Legs, Weapon
 
-### How Sprite Sheets Work
+- Equipping an item swaps the texture on its layer(s)
+- Arms equipment swaps both back arm + front arm sheets
+- Legs equipment swaps both back leg + front leg sheets
+- Multi-slot items (e.g., robes) can replace Chest + Belt + Legs simultaneously
+- Unequipping restores the base goblin layer sheet
 
-In Aseprite, export each animation as a horizontal strip:
-`File → Export Sprite Sheet → Layout: Horizontal Strip (Rows: 1)`
+**Weapons** are a separate sprite (not part of the sheet system). Positioned by code relative to the goblin. Details TBD — start with simple items and see how they look.
 
-Example: `run.png` with 8 frames at 32×48 = a 256×48 PNG.
+### Animation Layout (Per Sheet)
 
-```
-[frame1][frame2][frame3][frame4][frame5][frame6][frame7][frame8]
-  32×48   32×48   32×48   32×48   32×48   32×48   32×48   32×48
-```
+Every layer sheet — base or equipment — uses this identical row layout:
 
-**Save `.aseprite` source files** — they preserve layers/timeline. Only exported `.png` sheets are used by the engine.
+| Row | Animation | Frames | Loop? | Description |
+|-----|-----------|--------|-------|-------------|
+| 0 | **Walk** | 6 | Yes | Walking cycle |
+| 1 | **Run** | 8 | Yes | Full run cycle. Arms and legs pumping. Head can bob 1px. |
+| 2 | **Jump** (8) + **Fall** (2) | 10 | No | Jump frames then fall frames at col offset 8 |
+| 3 | **Idle** | 1 | — | Default standing pose |
+| 4 | **Idle Ear** | 1 | — | Ear twitch variant |
+| 5 | **Idle Blink** | 1 | — | Blink variant |
+| 6 | **Idle Fidget** | 1 | — | Fidget variant |
+| 7 | **Mine/Swing** | 6-8 | No | Pickaxe swing: wind-up → swing → impact. *Not yet created.* |
+| 8 | **Hurt** | 3 | No | Knockback/flinch. *Not yet created.* |
+| 9 | **Land** | 2-3 | No | Squash on landing. *Not yet created.* |
+
+Rows 7-9 are reserved — frame counts are approximate until animated.
+
+### Aseprite Workflow
+
+1. Animate the full goblin in one `.aseprite` file with all 7 body layers
+2. Each animation = one row in the timeline/tag system
+3. Export each layer individually as a 320×480 PNG:
+   - Hide all layers except the target layer
+   - Export as sprite sheet (10 columns × 10 rows)
+   - Transparent everywhere except that layer's pixels
+4. Equipment pieces follow the same process — animate in a layered file, export the relevant layer(s)
 
 ### Player File Structure
 
+**Base goblin (7 sheets):**
 ```
-assets/sprites/player/
-├── idle.aseprite / idle.png            ← 4-6 frames × 32×48
-├── run.aseprite / run.png              ← 6-8 frames × 32×48
-├── mine.aseprite / mine.png            ← 6-8 frames × 32×48
-├── jump.aseprite / jump.png            ← 2 frames × 32×48
-├── fall.aseprite / fall.png            ← 2 frames × 32×48
-├── land.aseprite / land.png            ← 2-3 frames × 32×48
-├── hurt.aseprite / hurt.png            ← 3 frames × 32×48
+assets/sprites/player/base/
+├── goblin_back_arm.png          ← 320×480 (10×10 grid)
+├── goblin_back_leg.png
+├── goblin_chest.png
+├── goblin_belt.png
+├── goblin_head.png
+├── goblin_front_leg.png
+├── goblin_front_arm.png
+```
+
+**Equipment (per item, only layers it affects):**
+```
+assets/sprites/equipment/
+├── iron_helmet/
+│   └── head.png                 ← 320×480, replaces head layer
+├── leather_chest/
+│   └── chest.png                ← replaces chest layer
+├── iron_greaves/
+│   ├── front_leg.png            ← replaces both leg layers
+│   └── back_leg.png
+├── goblin_robe/
+│   ├── chest.png                ← replaces chest + belt + legs
+│   ├── belt.png
+│   ├── front_leg.png
+│   └── back_leg.png
+├── leather_gloves/
+│   ├── front_arm.png            ← replaces both arm layers
+│   └── back_arm.png
+```
+
+**Weapons (separate sprites, not sheet-based):**
+```
+assets/sprites/weapons/
+├── wood_pickaxe.png             ← small sprite, positioned by code
+├── iron_sword.png
+├── ...
+```
+
+**Source files (not used by engine):**
+```
+art/Sprites/
+├── animations/
+│   ├── goblin_base_animations.aseprite    ← master layered file
+│   ├── goblin_geared_animations.aseprite  ← equipment variants
+│   └── ...
 ```
 
 ## Item Icons

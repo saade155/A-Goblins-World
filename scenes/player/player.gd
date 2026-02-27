@@ -86,6 +86,11 @@ const ZOOM_LEVELS: Array[float] = [1.0, 2.0, 3.0]
 ## Current index into ZOOM_LEVELS (default = 0 → 1.0x zoom).
 var _zoom_index: int = 0
 
+# --- UI Panels ---
+
+## Skill panel scene — self-contained CanvasLayer, handles its own input toggling.
+var _skill_panel_scene: PackedScene = preload("res://scenes/ui/skill_panel.tscn")
+
 # --- Animation ---
 
 ## Number of columns in the sprite sheet.
@@ -156,6 +161,10 @@ func _ready() -> void:
 
 	# Initialize idle variant timer with a random delay.
 	_reset_idle_timer()
+
+	# Add the skill panel UI (self-contained CanvasLayer with its own input handling).
+	var skill_panel = _skill_panel_scene.instantiate()
+	add_child(skill_panel)
 
 
 func _physics_process(delta: float) -> void:

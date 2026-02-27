@@ -105,6 +105,11 @@ func _get_save_meta_path(save_name: String) -> String:
 	return "%smeta.dat" % _get_save_path(save_name)
 
 
+## Path to a player profile directory.
+func _get_player_path(player_id: String) -> String:
+	return "user://players/%s/" % player_id
+
+
 # ===========================================================================
 #  Chunk I/O (reads/writes to current/)
 # ===========================================================================
@@ -465,6 +470,39 @@ func load_behavior_data(tracker: Node) -> bool:
 	tracker.stats = data.get("stats", {})
 	print("[SaveManager] BehaviorTracker data loaded.")
 	return true
+
+
+# ===========================================================================
+#  Skill data I/O (player profile, not world-specific)
+# ===========================================================================
+
+## Save skill data to player profile.
+func save_skill_data(skill_system: Node, player_id: String = "default") -> void:
+	var dir_path: String = _get_player_path(player_id)
+	_ensure_directory(dir_path)
+	var path: String = dir_path + "skills.dat"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if not file:
+		push_error("[SaveManager] Failed to save skill data: %s" % path)
+		return
+	file.store_var(skill_system.get_save_data())
+	file.close()
+
+
+## Load skill data from player profile.
+func load_skill_data(skill_system: Node, player_id: String = "default") -> bool:
+	var path: String = _get_player_path(player_id) + "skills.dat"
+	if not FileAccess.file_exists(path):
+		return false
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return false
+	var data = file.get_var()
+	file.close()
+	if data is Dictionary:
+		skill_system.load_save_data(data)
+		return true
+	return false
 
 
 # ===========================================================================
