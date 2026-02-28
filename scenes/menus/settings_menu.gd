@@ -3,6 +3,11 @@ extends Control
 signal back_pressed
 
 func _ready() -> void:
+	# Add keybinds tab programmatically
+	var keybinds_tab := VBoxContainer.new()
+	keybinds_tab.set_script(preload("res://scenes/menus/keybinds_tab.gd"))
+	$PanelContainer/MarginContainer/VBoxContainer/TabContainer.add_child(keybinds_tab)
+
 	# Load current values from SettingsManager
 	%MasterSlider.value = SettingsManager.master_volume * 100.0
 	%SFXSlider.value = SettingsManager.sfx_volume * 100.0
