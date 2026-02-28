@@ -67,8 +67,8 @@ func _stamp_structure(world_data: WorldData, world_pos: Vector2i, structure_data
 ##   - A small alcove on the left with dirt for atmosphere
 static func create_spawn_chamber() -> Dictionary:
 	var tiles: Dictionary = {}
-	var width: int = 16
-	var height: int = 10
+	var width: int = 24
+	var height: int = 14
 
 	# Fill everything solid first (stone)
 	for x in range(width):

@@ -20,6 +20,12 @@ func _ready() -> void:
 		_hide()
 
 
+## Update the loading label text. Called by ChunkManager during world generation
+## to show progress percentage.
+func set_progress_text(text: String) -> void:
+	%LoadingLabel.text = text
+
+
 func _on_load_complete() -> void:
 	_hide()
 

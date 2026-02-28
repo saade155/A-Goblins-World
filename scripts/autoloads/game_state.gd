@@ -22,7 +22,7 @@ var world_seed: int = 0
 
 ## Starting depth in tiles. Higher = deeper underground.
 ## Easy: 80, Normal: 170, Hard: 280
-var start_depth: int = 170
+var start_depth: int = 50
 
 ## Saved player position from a loaded game. Null = new game (use start_depth).
 var saved_player_position: Variant = null
@@ -38,6 +38,9 @@ var world_display_name: String = ""
 
 ## Total playtime for the current world in seconds.
 var playtime_seconds: float = 0.0
+
+## World size preset. -1 = legacy/infinite, 0+ = WorldData.WorldSize enum.
+var world_size: int = -1
 
 
 func _ready() -> void:
@@ -57,8 +60,8 @@ func register_player(player_node: CharacterBody2D) -> void:
 		player_node.global_position = saved_player_position
 		print("[GameState] Player restored to saved position: %s" % str(saved_player_position))
 	else:
-		player_node.global_position = Vector2(0, start_depth * 32)
-		print("[GameState] Player registered at start_depth=%d (y=%d)" % [start_depth, start_depth * 32])
+		player_node.global_position = Vector2(0, start_depth * 16)
+		print("[GameState] Player registered at start_depth=%d (y=%d)" % [start_depth, start_depth * 16])
 
 	# Safety check: nudge up if spawning inside solid tiles
 	_ensure_safe_spawn(player_node)
@@ -70,7 +73,7 @@ func _ensure_safe_spawn(player_node: CharacterBody2D) -> void:
 	if not world_data:
 		return
 
-	var tile_size: int = 32
+	var tile_size: int = 16
 	var pos: Vector2 = player_node.global_position
 	# Convert pixel position to tile coordinates (player origin is at feet-ish area)
 	var tile_x: int = floori(pos.x / tile_size)
@@ -115,7 +118,8 @@ func reset_for_new_game() -> void:
 	world_slot_name = ""
 	world_display_name = ""
 	world_seed = 0
-	start_depth = 170
+	start_depth = 50
+	world_size = 0  # Default to SMALL for new games
 	print("[GameState] State reset for new game.")
 
 

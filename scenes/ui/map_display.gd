@@ -172,8 +172,8 @@ func _render_map() -> void:
 
 	var player_pos: Vector2 = GameState.player.global_position
 	var player_tile := Vector2i(
-		floori(player_pos.x / 32.0),
-		floori(player_pos.y / 32.0)
+		floori(player_pos.x / 16.0),
+		floori(player_pos.y / 16.0)
 	)
 
 	var center_tile: Vector2i = player_tile + map_offset

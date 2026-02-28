@@ -18,7 +18,7 @@ extends RefCounted
 class_name SaveManager
 
 ## File format version for future migration support.
-const SAVE_VERSION: int = 4
+const SAVE_VERSION: int = 5
 
 ## Directory layout version. 1 = flat (legacy), 2 = structured with current/ and saves/.
 const LAYOUT_VERSION: int = 2
@@ -110,11 +110,16 @@ func _get_player_path(player_id: String) -> String:
 	return "user://players/%s/" % player_id
 
 
+## Path to the fog of war data file (explored tiles).
+func _get_fog_path() -> String:
+	return "%sfog.dat" % _get_current_path()
+
+
 # ===========================================================================
 #  Chunk I/O (reads/writes to current/)
 # ===========================================================================
 
-## Save a single dirty chunk to disk. Stores tile data and torch positions.
+## Save a single dirty chunk to disk. Stores tile data, back walls, and torch positions.
 func save_chunk(chunk_coord: Vector2i, world_data: WorldData) -> void:
 	var path: String = _get_chunk_path(chunk_coord)
 	_ensure_directory(path.get_base_dir())
@@ -124,13 +129,15 @@ func save_chunk(chunk_coord: Vector2i, world_data: WorldData) -> void:
 		return
 	var chunk_tiles: Dictionary = world_data.get_chunk_tiles(chunk_coord)
 	var chunk_torches: Array = world_data.get_chunk_torches(chunk_coord)
+	var chunk_back_walls: Dictionary = world_data.get_chunk_back_walls(chunk_coord)
 	file.store_var(SAVE_VERSION)
 	file.store_var(chunk_tiles)
 	file.store_var(chunk_torches)
+	file.store_var(chunk_back_walls)
 	file.close()
 
 
-## Load a chunk from disk. Returns {"tiles": Dictionary, "torches": Array} or null.
+## Load a chunk from disk. Returns {"tiles": Dictionary, "torches": Array, "back_walls": Dictionary} or null.
 func load_chunk(chunk_coord: Vector2i) -> Variant:
 	var path: String = _get_chunk_path(chunk_coord)
 	if not FileAccess.file_exists(path):
@@ -138,13 +145,16 @@ func load_chunk(chunk_coord: Vector2i) -> Variant:
 	var file := FileAccess.open(path, FileAccess.READ)
 	if not file:
 		return null
-	var version: int = file.get_var()
+	var _version: int = file.get_var()
 	var chunk_tiles: Dictionary = file.get_var()
 	var chunk_torches: Array = []
 	if not file.eof_reached():
 		chunk_torches = file.get_var()
+	var chunk_back_walls: Dictionary = {}
+	if not file.eof_reached():
+		chunk_back_walls = file.get_var()
 	file.close()
-	return {"tiles": chunk_tiles, "torches": chunk_torches}
+	return {"tiles": chunk_tiles, "torches": chunk_torches, "back_walls": chunk_back_walls}
 
 
 ## Check if a saved chunk file exists on disk.
@@ -156,9 +166,10 @@ func has_saved_chunk(chunk_coord: Vector2i) -> bool:
 #  World metadata (immutable — written once on world creation)
 # ===========================================================================
 
-## Save immutable world metadata: seed, start depth, display name.
+## Save immutable world metadata: seed, start depth, display name, world size.
 ## Only called on NEW world creation. Never overwritten after that.
-func save_world_meta(world_seed: int, start_depth: int, display_name: String = "") -> void:
+## world_size: -1 = legacy/infinite, 0+ = WorldData.WorldSize enum value.
+func save_world_meta(world_seed: int, start_depth: int, display_name: String = "", world_size: int = -1) -> void:
 	var path: String = _get_world_meta_path()
 	_ensure_directory(path.get_base_dir())
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -171,10 +182,11 @@ func save_world_meta(world_seed: int, start_depth: int, display_name: String = "
 		"world_seed": world_seed,
 		"start_depth": start_depth,
 		"display_name": display_name if display_name != "" else world_name,
+		"world_size": world_size,
 	}
 	file.store_var(data)
 	file.close()
-	print("[SaveManager] World meta saved (immutable). Seed: %d" % world_seed)
+	print("[SaveManager] World meta saved (immutable). Seed: %d, world_size: %d" % [world_seed, world_size])
 
 
 ## Load immutable world metadata. Returns Dictionary or null if no save exists.
@@ -194,15 +206,19 @@ func load_world_meta() -> Variant:
 	var data: Dictionary = file.get_var()
 	file.close()
 
-	# Reject saves from older tile-size era (v1 used 16px tiles, v2+ uses 32px).
+	# Reject saves older than v5 — too many breaking changes to migrate.
 	var version: int = data.get("version", 1)
-	if version < 2:
-		print("[SaveManager] WARNING: Save version %d is incompatible. Generating new world." % version)
+	if version < 5:
+		print("[SaveManager] Save version %d is too old (minimum: 5). Cannot load." % version)
 		return null
 
 	# Backward compat: ensure display_name exists.
 	if not data.has("display_name"):
 		data["display_name"] = world_name
+
+	# Backward compat: world_size added in v5. Missing = legacy infinite world.
+	if not data.has("world_size"):
+		data["world_size"] = -1
 
 	# Strip session fields that may remain from pre-migration world.dat reads.
 	# These now live in state.dat. We keep them in the returned dict only for
@@ -506,6 +522,39 @@ func load_skill_data(skill_system: Node, player_id: String = "default") -> bool:
 
 
 # ===========================================================================
+#  Fog of war data I/O (current/fog.dat)
+# ===========================================================================
+
+## Save explored tile data for fog of war.
+func save_fog_data(explored_tiles: Dictionary) -> void:
+	var path: String = _get_fog_path()
+	_ensure_directory(path.get_base_dir())
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if not file:
+		push_error("[SaveManager] Failed to save fog data: %s" % error_string(FileAccess.get_open_error()))
+		return
+	file.store_var(SAVE_VERSION)
+	file.store_var(explored_tiles)
+	file.close()
+
+
+## Load explored tile data for fog of war. Returns empty Dictionary if no save.
+func load_fog_data() -> Dictionary:
+	var path: String = _get_fog_path()
+	if not FileAccess.file_exists(path):
+		return {}
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return {}
+	var _version = file.get_var()
+	var data = file.get_var()
+	file.close()
+	if data is Dictionary:
+		return data
+	return {}
+
+
+# ===========================================================================
 #  World existence / slot enumeration
 # ===========================================================================
 
@@ -704,6 +753,7 @@ func migrate_if_needed() -> void:
 		"world_seed": old_data.get("world_seed", 0),
 		"start_depth": old_data.get("start_depth", 0),
 		"display_name": old_data.get("display_name", world_name),
+		"world_size": old_data.get("world_size", -1),  # Legacy saves are infinite
 	}
 	var meta_file := FileAccess.open(meta_path, FileAccess.WRITE)
 	if meta_file:

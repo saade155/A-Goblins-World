@@ -6,6 +6,9 @@
 
 extends Node
 
+## Tile pixel size constant for reference by other systems.
+const TILE_PX: int = 16
+
 # --- Tile type enum ---
 # EMPTY = no tile. Other values correspond to atlas positions in the tile atlas.
 enum TileType {
@@ -251,163 +254,179 @@ var item_to_tile: Dictionary = {
 	"clay": TileType.CLAY,
 }
 
-# --- Autotile support ---
-# Bitmask convention: bit=1 means same-type neighbor IS present.
-# Bit 0 = North, Bit 1 = East, Bit 2 = South, Bit 3 = West.
-
-# Maps 4-bit cardinal bitmask → atlas coords (0-indexed) within the autotile sheet.
-const BITMASK_TO_ATLAS: Dictionary = {
-	0:  Vector2i(6, 6),  # Alone
-	1:  Vector2i(6, 3),  # Only N → bot cap
-	2:  Vector2i(1, 6),  # Only E → left cap
-	3:  Vector2i(1, 3),  # N+E → BL corner
-	4:  Vector2i(6, 1),  # Only S → top cap
-	5:  Vector2i(6, 2),  # N+S → vert bar
-	6:  Vector2i(1, 1),  # E+S → TL corner
-	7:  Vector2i(1, 2),  # N+E+S → Left edge
-	8:  Vector2i(3, 6),  # Only W → right cap
-	9:  Vector2i(3, 3),  # N+W → BR corner
-	10: Vector2i(2, 6),  # E+W → horiz bar
-	11: Vector2i(2, 3),  # N+E+W → Bot edge
-	12: Vector2i(3, 1),  # S+W → TR corner
-	13: Vector2i(3, 2),  # N+S+W → Right edge
-	14: Vector2i(2, 1),  # E+S+W → Top edge
-	15: Vector2i(2, 2),  # All → Center
-}
-
-
-# Tile types that have hand-drawn autotile sprite sheets.
-# TileType → {path: String, block_offset: Vector2i}
-var autotile_textures: Dictionary = {
-	TileType.STONE: {"path": "res://assets/tilesets/stone_tiles.png", "block_offset": Vector2i(0, 0)},
-	TileType.DIRT: {"path": "res://assets/tilesets/dirt_tiles.png", "block_offset": Vector2i(0, 0)},
-}
-
-# Populated at runtime by ChunkManager when building the TileSet.
-# TileType → source_id (int)
-var autotile_source_ids: Dictionary = {}
-
-# --- Edge overlay system ---
-
-## Inner corner overlays (col 8, rows 0-7). Placed on diagonal neighbor cell.
-## Keys are from the TILE's perspective: which diagonal is empty.
-## 2 variants per direction, noise-selected.
-const INNER_CORNER_OVERLAY_ATLAS: Dictionary = {
-	"SE": [Vector2i(8, 0), Vector2i(8, 4)],  # ITL in spec
-	"SW": [Vector2i(8, 1), Vector2i(8, 5)],  # ITR in spec
-	"NE": [Vector2i(8, 2), Vector2i(8, 6)],  # IBL in spec
-	"NW": [Vector2i(8, 3), Vector2i(8, 7)],  # IBR in spec
-}
-
-## Edge direction enum.
-enum EdgeDir { TOP, RIGHT, BOTTOM, LEFT }
-
-## Edge overlay atlas coordinates indexed by [direction][context].
-## Context is determined by perpendicular neighbors of the source tile.
-## For TOP/BOTTOM: perpendicular = E and W neighbors.
-## For LEFT/RIGHT: perpendicular = N and S neighbors.
-## Context key: (perp1_filled << 2) | (perp2_filled << 1) | parallel_filled
-##   TOP/BOTTOM: perp1=E, perp2=W, parallel=S/N (does source extend away from edge?)
-##   LEFT/RIGHT: perp1=S, perp2=N, parallel=E/W (does source extend away from edge?)
-const EDGE_CONTEXT_ATLAS: Dictionary = {
-	EdgeDir.TOP: {
-		# key: (has_E << 2) | (has_W << 1) | has_S → atlas coord
-		0: Vector2i(6, 5),  # alone narrow
-		1: Vector2i(6, 0),  # pillar narrow (extends S)
-		2: Vector2i(3, 5),  # bar right cap (W only)
-		3: Vector2i(3, 0),  # block right end (W+S)
-		4: Vector2i(1, 5),  # bar left cap (E only)
-		5: Vector2i(1, 0),  # block left end (E+S)
-		6: Vector2i(2, 5),  # bar center (E+W)
-		7: Vector2i(2, 0),  # block center (E+W+S)
+# --- Biome color palettes ---
+# Each biome gets a dictionary of colors used for tile rendering.
+# Keys: wall, wall_alt, ground, ground_alt, back_wall, ore_*, surface, subsurface
+var biome_palettes: Dictionary = {
+	"standard_caverns": {
+		"wall": Color(0.35, 0.32, 0.3),
+		"wall_alt": Color(0.4, 0.36, 0.33),
+		"ground": Color(0.3, 0.22, 0.15),
+		"ground_alt": Color(0.28, 0.2, 0.13),
+		"back_wall": Color(0.18, 0.14, 0.12),
+		"ore_iron": Color(0.7, 0.5, 0.35),
+		"ore_copper": Color(0.7, 0.55, 0.3),
+		"ore_gold": Color(0.85, 0.75, 0.2),
+		"ore_crystal": Color(0.3, 0.8, 0.75),
+		"ore_ruby": Color(0.8, 0.15, 0.15),
+		"ore_emerald": Color(0.2, 0.75, 0.3),
+		"surface": Color(0.35, 0.32, 0.3),
+		"subsurface": Color(0.3, 0.25, 0.2),
 	},
-	EdgeDir.BOTTOM: {
-		# key: (has_E << 2) | (has_W << 1) | has_N → atlas coord
-		0: Vector2i(6, 7),  # alone narrow
-		1: Vector2i(6, 4),  # pillar narrow (extends N)
-		2: Vector2i(3, 7),  # bar right cap (W only)
-		3: Vector2i(3, 4),  # block right end (W+N)
-		4: Vector2i(1, 7),  # bar left cap (E only)
-		5: Vector2i(1, 4),  # block left end (E+N)
-		6: Vector2i(2, 7),  # bar center (E+W)
-		7: Vector2i(2, 4),  # block center (E+W+N)
+	"sandy_hollows": {
+		"wall": Color(0.6, 0.5, 0.35),
+		"wall_alt": Color(0.55, 0.45, 0.32),
+		"ground": Color(0.65, 0.55, 0.38),
+		"ground_alt": Color(0.6, 0.5, 0.35),
+		"back_wall": Color(0.35, 0.28, 0.18),
+		"ore_iron": Color(0.7, 0.5, 0.35),
+		"ore_copper": Color(0.7, 0.55, 0.3),
+		"ore_gold": Color(0.85, 0.75, 0.2),
+		"ore_crystal": Color(0.3, 0.8, 0.75),
+		"ore_ruby": Color(0.8, 0.15, 0.15),
+		"ore_emerald": Color(0.2, 0.75, 0.3),
+		"surface": Color(0.76, 0.7, 0.5),
+		"subsurface": Color(0.6, 0.5, 0.35),
 	},
-	EdgeDir.LEFT: {
-		# key: (has_S << 2) | (has_N << 1) | has_E → atlas coord
-		0: Vector2i(5, 6),  # alone narrow
-		1: Vector2i(0, 6),  # horiz pillar narrow (extends E)
-		2: Vector2i(5, 3),  # vert pillar bot cap (N only)
-		3: Vector2i(0, 3),  # block bot end (N+E)
-		4: Vector2i(5, 1),  # vert pillar top cap (S only)
-		5: Vector2i(0, 1),  # block top end (S+E)
-		6: Vector2i(5, 2),  # vert pillar center (S+N)
-		7: Vector2i(0, 2),  # block center (S+N+E)
+	"swamp_depths": {
+		"wall": Color(0.2, 0.25, 0.18),
+		"wall_alt": Color(0.22, 0.28, 0.2),
+		"ground": Color(0.25, 0.2, 0.12),
+		"ground_alt": Color(0.22, 0.18, 0.1),
+		"back_wall": Color(0.1, 0.15, 0.08),
+		"ore_iron": Color(0.6, 0.45, 0.3),
+		"ore_copper": Color(0.6, 0.5, 0.28),
+		"ore_gold": Color(0.8, 0.7, 0.2),
+		"ore_crystal": Color(0.3, 0.75, 0.7),
+		"ore_ruby": Color(0.75, 0.15, 0.15),
+		"ore_emerald": Color(0.2, 0.7, 0.28),
+		"surface": Color(0.3, 0.25, 0.15),
+		"subsurface": Color(0.22, 0.2, 0.12),
 	},
-	EdgeDir.RIGHT: {
-		# key: (has_S << 2) | (has_N << 1) | has_W → atlas coord
-		0: Vector2i(7, 6),  # alone narrow
-		1: Vector2i(4, 6),  # horiz pillar narrow (extends W)
-		2: Vector2i(7, 3),  # vert pillar bot cap (N only)
-		3: Vector2i(4, 3),  # block bot end (N+W)
-		4: Vector2i(7, 1),  # vert pillar top cap (S only)
-		5: Vector2i(4, 1),  # block top end (S+W)
-		6: Vector2i(7, 2),  # vert pillar center (S+N)
-		7: Vector2i(4, 2),  # block center (S+N+W)
+	"fungal_grove": {
+		"wall": Color(0.2, 0.3, 0.25),
+		"wall_alt": Color(0.18, 0.28, 0.22),
+		"ground": Color(0.15, 0.22, 0.18),
+		"ground_alt": Color(0.12, 0.2, 0.15),
+		"back_wall": Color(0.1, 0.15, 0.12),
+		"ore_iron": Color(0.6, 0.45, 0.3),
+		"ore_copper": Color(0.6, 0.5, 0.28),
+		"ore_gold": Color(0.8, 0.7, 0.2),
+		"ore_crystal": Color(0.3, 0.8, 0.75),
+		"ore_ruby": Color(0.75, 0.15, 0.15),
+		"ore_emerald": Color(0.2, 0.75, 0.3),
+		"surface": Color(0.15, 0.22, 0.18),
+		"subsurface": Color(0.12, 0.18, 0.14),
+	},
+	"frozen_caverns": {
+		"wall": Color(0.55, 0.6, 0.7),
+		"wall_alt": Color(0.5, 0.55, 0.65),
+		"ground": Color(0.6, 0.65, 0.75),
+		"ground_alt": Color(0.55, 0.6, 0.7),
+		"back_wall": Color(0.3, 0.35, 0.45),
+		"ore_iron": Color(0.65, 0.5, 0.4),
+		"ore_copper": Color(0.65, 0.55, 0.35),
+		"ore_gold": Color(0.8, 0.72, 0.25),
+		"ore_crystal": Color(0.4, 0.85, 0.8),
+		"ore_ruby": Color(0.75, 0.2, 0.2),
+		"ore_emerald": Color(0.25, 0.7, 0.35),
+		"surface": Color(0.85, 0.88, 0.95),
+		"subsurface": Color(0.55, 0.6, 0.7),
+	},
+	"volcanic_depths": {
+		"wall": Color(0.3, 0.18, 0.12),
+		"wall_alt": Color(0.35, 0.2, 0.14),
+		"ground": Color(0.25, 0.12, 0.08),
+		"ground_alt": Color(0.22, 0.1, 0.06),
+		"back_wall": Color(0.15, 0.08, 0.05),
+		"ore_iron": Color(0.7, 0.45, 0.3),
+		"ore_copper": Color(0.7, 0.5, 0.28),
+		"ore_gold": Color(0.85, 0.7, 0.2),
+		"ore_crystal": Color(0.35, 0.8, 0.7),
+		"ore_ruby": Color(0.9, 0.2, 0.1),
+		"ore_emerald": Color(0.25, 0.7, 0.28),
+		"surface": Color(0.3, 0.18, 0.12),
+		"subsurface": Color(0.25, 0.14, 0.1),
+	},
+	"crystal_caverns": {
+		"wall": Color(0.3, 0.25, 0.4),
+		"wall_alt": Color(0.35, 0.28, 0.45),
+		"ground": Color(0.25, 0.2, 0.35),
+		"ground_alt": Color(0.22, 0.18, 0.32),
+		"back_wall": Color(0.15, 0.12, 0.25),
+		"ore_iron": Color(0.65, 0.5, 0.4),
+		"ore_copper": Color(0.65, 0.55, 0.35),
+		"ore_gold": Color(0.82, 0.72, 0.25),
+		"ore_crystal": Color(0.5, 0.9, 0.85),
+		"ore_ruby": Color(0.85, 0.2, 0.15),
+		"ore_emerald": Color(0.25, 0.75, 0.35),
+		"surface": Color(0.3, 0.25, 0.4),
+		"subsurface": Color(0.25, 0.2, 0.35),
+	},
+	"forest": {
+		"wall": Color(0.35, 0.32, 0.3),
+		"wall_alt": Color(0.4, 0.36, 0.33),
+		"ground": Color(0.3, 0.22, 0.15),
+		"ground_alt": Color(0.28, 0.2, 0.13),
+		"back_wall": Color(0.18, 0.14, 0.12),
+		"surface": Color(0.3, 0.55, 0.2),
+		"subsurface": Color(0.4, 0.3, 0.18),
+	},
+	"desert": {
+		"wall": Color(0.6, 0.5, 0.35),
+		"wall_alt": Color(0.55, 0.45, 0.32),
+		"ground": Color(0.65, 0.55, 0.38),
+		"ground_alt": Color(0.6, 0.5, 0.35),
+		"back_wall": Color(0.35, 0.28, 0.18),
+		"surface": Color(0.76, 0.7, 0.5),
+		"subsurface": Color(0.6, 0.5, 0.35),
+	},
+	"swamp": {
+		"wall": Color(0.25, 0.2, 0.12),
+		"wall_alt": Color(0.28, 0.22, 0.14),
+		"ground": Color(0.3, 0.25, 0.15),
+		"ground_alt": Color(0.28, 0.22, 0.13),
+		"back_wall": Color(0.12, 0.1, 0.06),
+		"surface": Color(0.3, 0.25, 0.15),
+		"subsurface": Color(0.25, 0.2, 0.12),
+	},
+	"mountains": {
+		"wall": Color(0.45, 0.43, 0.42),
+		"wall_alt": Color(0.5, 0.48, 0.46),
+		"ground": Color(0.4, 0.38, 0.36),
+		"ground_alt": Color(0.38, 0.36, 0.34),
+		"back_wall": Color(0.25, 0.23, 0.22),
+		"surface": Color(0.5, 0.48, 0.45),
+		"subsurface": Color(0.45, 0.43, 0.42),
+	},
+	"snowy_peaks": {
+		"wall": Color(0.55, 0.6, 0.7),
+		"wall_alt": Color(0.5, 0.55, 0.65),
+		"ground": Color(0.6, 0.65, 0.75),
+		"ground_alt": Color(0.55, 0.6, 0.7),
+		"back_wall": Color(0.3, 0.35, 0.45),
+		"surface": Color(0.85, 0.88, 0.95),
+		"subsurface": Color(0.55, 0.6, 0.7),
+	},
+	"beach": {
+		"wall": Color(0.6, 0.5, 0.35),
+		"wall_alt": Color(0.55, 0.45, 0.32),
+		"ground": Color(0.65, 0.55, 0.38),
+		"ground_alt": Color(0.6, 0.5, 0.35),
+		"back_wall": Color(0.35, 0.28, 0.18),
+		"surface": Color(0.76, 0.7, 0.5),
+		"subsurface": Color(0.7, 0.62, 0.42),
+	},
+	"ocean": {
+		"wall": Color(0.6, 0.5, 0.35),
+		"wall_alt": Color(0.55, 0.45, 0.32),
+		"ground": Color(0.65, 0.55, 0.38),
+		"ground_alt": Color(0.6, 0.5, 0.35),
+		"back_wall": Color(0.35, 0.28, 0.18),
+		"surface": Color(0.76, 0.7, 0.5),
+		"subsurface": Color(0.7, 0.62, 0.42),
 	},
 }
-
-## Outer corner overlays (placed on diagonal empty neighbor cell).
-## 4 variants per corner from the four quadrants of the spatial grid.
-const CORNER_ATLAS: Dictionary = {
-	"TL": [Vector2i(0, 0), Vector2i(5, 0), Vector2i(0, 5), Vector2i(5, 5)],
-	"TR": [Vector2i(4, 0), Vector2i(7, 0), Vector2i(4, 5), Vector2i(7, 5)],
-	"BL": [Vector2i(0, 4), Vector2i(5, 4), Vector2i(0, 7), Vector2i(5, 7)],
-	"BR": [Vector2i(4, 4), Vector2i(7, 4), Vector2i(4, 7), Vector2i(7, 7)],
-}
-
-## Maps bitmask values to their variant row (cols 9-15).
-## Only the 3x3 block positions get variants.
-const VARIANT_ROWS: Dictionary = {
-	6:  0,  # TL corner
-	14: 1,  # Top edge
-	12: 2,  # TR corner
-	7:  3,  # Left edge
-	15: 4,  # Center
-	13: 5,  # Right edge
-	3:  6,  # BL corner
-	11: 7,  # Bot edge
-	9:  8,  # BR corner
-}
-
-## Rarity tier boundaries for variant selection.
-## Common: cols 9-11 (3 variants, ~60%)
-## Uncommon: cols 12-13 (2 variants, ~25%)
-## Rare: cols 14-15 (2 variants, ~15%)
-const VARIANT_COLS: Array[int] = [9, 10, 11, 12, 13, 14, 15]
-
-## Maps edge direction to cardinal offset.
-const EDGE_DIR_OFFSETS: Dictionary = {
-	EdgeDir.TOP: Vector2i(0, -1),
-	EdgeDir.RIGHT: Vector2i(1, 0),
-	EdgeDir.BOTTOM: Vector2i(0, 1),
-	EdgeDir.LEFT: Vector2i(-1, 0),
-}
-
-## Maps edge direction to overlay layer name.
-const EDGE_DIR_LAYER: Dictionary = {
-	EdgeDir.TOP: "edge_floor",
-	EdgeDir.RIGHT: "edge_wall_r",
-	EdgeDir.BOTTOM: "edge_ceiling",
-	EdgeDir.LEFT: "edge_wall_l",
-}
-
-# --- Variant noise ---
-
-## Noise generator for deterministic per-tile variant selection.
-var _variant_noise: FastNoiseLite = null
-
-## Which tile types have edge overlay art (auto-detected at runtime).
-var edge_capable_types: Dictionary = {}
 
 
 func _ready() -> void:
@@ -455,119 +474,18 @@ func get_atlas_coords(tile_type: int) -> Vector2i:
 	return Vector2i(tile_type - 1, 0)
 
 
+## Get the color for a tile type. Returns white for unknown types.
+func get_color(tile_type: int) -> Color:
+	var props := get_properties(tile_type)
+	return props.get("color", Color.WHITE)
+
+
+## Get the display name for a tile type. Returns "Unknown" for unknown types.
+func get_tile_name(tile_type: int) -> String:
+	var props := get_properties(tile_type)
+	return props.get("name", "Unknown")
+
+
 ## Get the TileType from an item name string. Returns EMPTY if not found.
 func get_tile_from_item(item_name: String) -> int:
 	return item_to_tile.get(item_name, TileType.EMPTY)
-
-
-## Check if a tile type has an autotile sprite sheet registered.
-func has_autotile(tile_type: int) -> bool:
-	return autotile_textures.has(tile_type)
-
-
-## Get the TileSet source ID for an autotiled tile type.
-## Returns -1 if not registered or not yet built.
-func get_autotile_source_id(tile_type: int) -> int:
-	return autotile_source_ids.get(tile_type, -1)
-
-
-# --- Edge overlay system ---
-
-## Initialize the variant noise from the world seed. Call once after world loads.
-func initialize_variant_noise(world_seed: int) -> void:
-	_variant_noise = FastNoiseLite.new()
-	_variant_noise.noise_type = FastNoiseLite.TYPE_VALUE
-	_variant_noise.seed = world_seed + 9999
-	_variant_noise.frequency = 0.5
-
-
-## Get a deterministic variant index for a world position.
-func get_variant_index(world_pos: Vector2i, variant_count: int) -> int:
-	if _variant_noise == null or variant_count <= 1:
-		return 0
-	var noise_val: float = _variant_noise.get_noise_2d(float(world_pos.x), float(world_pos.y))
-	var normalized: float = (noise_val + 1.0) / 2.0
-	return clampi(int(normalized * variant_count), 0, variant_count - 1)
-
-
-## Get the edge overlay atlas coords for a direction based on source tile context.
-## perp1 and perp2 are whether the perpendicular neighbors are filled.
-## parallel is whether the source tile extends away from the edge (depth).
-## For TOP: perp1=E, perp2=W, parallel=S
-## For BOTTOM: perp1=E, perp2=W, parallel=N
-## For LEFT: perp1=S, perp2=N, parallel=E
-## For RIGHT: perp1=S, perp2=N, parallel=W
-func get_edge_coords(direction: int, perp1_filled: bool, perp2_filled: bool, parallel_filled: bool) -> Vector2i:
-	var context_key: int = (int(perp1_filled) << 2) | (int(perp2_filled) << 1) | int(parallel_filled)
-	return EDGE_CONTEXT_ATLAS[direction][context_key]
-
-
-## Get outer corner atlas coords for a corner position.
-func get_corner_coords(corner_name: String, world_pos: Vector2i) -> Vector2i:
-	var variants: Array = CORNER_ATLAS[corner_name]
-	var idx: int = get_variant_index(world_pos, variants.size())
-	return variants[idx]
-
-
-## Get corner atlas coords based on the source tile's neighbor context.
-## adj_vertical: true if source tile has a solid neighbor in the vertical direction adjacent to this corner
-## adj_horizontal: true if source tile has a solid neighbor in the horizontal direction adjacent to this corner
-## For TL corner: adj_vertical=has_N, adj_horizontal=has_W
-## For TR corner: adj_vertical=has_N, adj_horizontal=has_E
-## For BL corner: adj_vertical=has_S, adj_horizontal=has_W
-## For BR corner: adj_vertical=has_S, adj_horizontal=has_E
-func get_corner_coords_contextual(corner_name: String, adj_vertical: bool, adj_horizontal: bool) -> Vector2i:
-	var variants: Array = CORNER_ATLAS[corner_name]
-	# Index mapping:
-	# 0 = block (both present), 1 = pillar (vertical only), 2 = bar (horizontal only), 3 = alone (neither)
-	var idx: int = 0
-	if adj_vertical and adj_horizontal:
-		idx = 0  # block
-	elif adj_vertical:
-		idx = 1  # pillar
-	elif adj_horizontal:
-		idx = 2  # bar
-	else:
-		idx = 3  # alone
-	return variants[idx]
-
-
-## Get inner corner overlay atlas coords for a diagonal direction.
-func get_inner_corner_overlay_coords(diagonal_name: String, world_pos: Vector2i) -> Vector2i:
-	var variants: Array = INNER_CORNER_OVERLAY_ATLAS.get(diagonal_name, [])
-	if variants.is_empty():
-		return Vector2i(-1, -1)
-	var idx: int = get_variant_index(world_pos, variants.size())
-	return variants[idx]
-
-
-## Get variant atlas coords for a bitmask at a world position.
-## Returns Vector2i(-1, -1) if no variant row exists for the bitmask.
-func get_variant_coords(bitmask: int, world_pos: Vector2i) -> Vector2i:
-	if not VARIANT_ROWS.has(bitmask):
-		return Vector2i(-1, -1)
-	var row: int = VARIANT_ROWS[bitmask]
-	if _variant_noise == null:
-		return Vector2i(-1, -1)
-	var noise_val: float = _variant_noise.get_noise_2d(float(world_pos.x), float(world_pos.y))
-	var normalized: float = (noise_val + 1.0) / 2.0
-	# Weighted selection: 0-60% common, 60-85% uncommon, 85-100% rare
-	var col: int
-	if normalized < 0.6:
-		# Common: cols 9-11
-		var sub_idx: int = int(normalized / 0.6 * 3.0)
-		col = 9 + clampi(sub_idx, 0, 2)
-	elif normalized < 0.85:
-		# Uncommon: cols 12-13
-		var sub_idx: int = int((normalized - 0.6) / 0.25 * 2.0)
-		col = 12 + clampi(sub_idx, 0, 1)
-	else:
-		# Rare: cols 14-15
-		var sub_idx: int = int((normalized - 0.85) / 0.15 * 2.0)
-		col = 14 + clampi(sub_idx, 0, 1)
-	return Vector2i(col, row)
-
-
-## Check if a tile type has edge overlay art.
-func has_edge_overlay(tile_type: int) -> bool:
-	return edge_capable_types.get(tile_type, false)

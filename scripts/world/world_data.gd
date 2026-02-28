@@ -16,8 +16,26 @@ extends RefCounted
 ## Chunk size in tiles. Each chunk is CHUNK_SIZE x CHUNK_SIZE.
 const CHUNK_SIZE: int = 32
 
+## World size presets selectable at world creation.
+enum WorldSize { SMALL, MEDIUM, LARGE }
+
+const WORLD_SIZE_PRESETS: Dictionary = {
+	WorldSize.SMALL: { "width": 2400, "height": 800, "surface_rows": 100 },
+	WorldSize.MEDIUM: { "width": 3600, "height": 1000, "surface_rows": 100 },
+	WorldSize.LARGE: { "width": 4800, "height": 1200, "surface_rows": 100 },
+}
+
+## World size in tiles. Set at creation, immutable after.
+var world_width: int = 0
+var world_height: int = 0
+var surface_rows: int = 0  # rows above y=0 for sky/surface
+
 ## Tile storage: world position -> TileType value.
 var tiles: Dictionary = {}
+
+## Back wall tile storage: world position -> TileType value.
+## Back walls are visible behind caves, rendered darker, and mineable.
+var back_wall_tiles: Dictionary = {}
 
 ## Track which chunks have been modified by the player.
 var dirty_chunks: Dictionary = {}  # Vector2i -> bool
@@ -29,8 +47,28 @@ var entrances: Dictionary = {}  # Vector2i -> String (scene path)
 var torches: Dictionary = {}
 
 
+## Configure world dimensions from a WorldSize preset.
+func set_world_size(size_enum: int) -> void:
+	var preset: Dictionary = WORLD_SIZE_PRESETS.get(size_enum, WORLD_SIZE_PRESETS[WorldSize.SMALL])
+	world_width = preset["width"]
+	world_height = preset["height"]
+	surface_rows = preset["surface_rows"]
+
+
+## Check if a world position is within the finite world boundaries.
+## Returns true if world bounds are not set (legacy/infinite) or if the position is in-bounds.
+func is_in_bounds(world_pos: Vector2i) -> bool:
+	if world_width == 0:
+		return true  # No bounds set (legacy/infinite)
+	return (world_pos.x >= 0 and world_pos.x < world_width
+		and world_pos.y >= -surface_rows and world_pos.y < world_height - surface_rows)
+
+
 ## Get the tile type at a world position. Returns TileData.TileType.EMPTY if not found.
+## Returns DEEP_ROCK (8) for out-of-bounds positions as an unbreakable boundary.
 func get_tile(world_pos: Vector2i) -> int:
+	if world_width > 0 and not is_in_bounds(world_pos):
+		return 8  # DEEP_ROCK — boundary tile
 	return tiles.get(world_pos, 0)  # 0 = TileType.EMPTY
 
 
@@ -54,8 +92,64 @@ func remove_tile(world_pos: Vector2i) -> void:
 
 
 ## Check if a non-empty tile exists at a world position.
+## Out-of-bounds positions always count as solid (boundary).
 func has_tile(world_pos: Vector2i) -> bool:
+	if world_width > 0 and not is_in_bounds(world_pos):
+		return true  # Boundary counts as solid
 	return tiles.has(world_pos) and tiles[world_pos] != 0
+
+
+# --- Back wall accessors ---
+
+## Get the back wall tile type at a world position. Returns 0 (EMPTY) if not found.
+func get_back_wall(world_pos: Vector2i) -> int:
+	return back_wall_tiles.get(world_pos, 0)
+
+
+## Set a back wall tile at a world position. Marks the containing chunk as dirty.
+func set_back_wall(world_pos: Vector2i, tile_type: int) -> void:
+	if tile_type == 0:
+		remove_back_wall(world_pos)
+		return
+	back_wall_tiles[world_pos] = tile_type
+	var chunk_coord := world_to_chunk(world_pos)
+	dirty_chunks[chunk_coord] = true
+
+
+## Remove a back wall tile at a world position. Marks the containing chunk as dirty.
+func remove_back_wall(world_pos: Vector2i) -> void:
+	back_wall_tiles.erase(world_pos)
+	var chunk_coord := world_to_chunk(world_pos)
+	dirty_chunks[chunk_coord] = true
+
+
+## Check if a back wall tile exists at a world position.
+func has_back_wall(world_pos: Vector2i) -> bool:
+	return back_wall_tiles.has(world_pos)
+
+
+## Get all back wall tiles belonging to a chunk as {local_pos: tile_type}.
+func get_chunk_back_walls(chunk_coord: Vector2i) -> Dictionary:
+	var result: Dictionary = {}
+	var origin := chunk_to_world(chunk_coord)
+	for x in range(CHUNK_SIZE):
+		for y in range(CHUNK_SIZE):
+			var wpos := origin + Vector2i(x, y)
+			if back_wall_tiles.has(wpos):
+				result[Vector2i(x, y)] = back_wall_tiles[wpos]
+	return result
+
+
+## Bulk set all back wall tiles for a chunk. EMPTY tiles erase existing entries.
+## Does NOT mark the chunk as dirty (used for initial generation / loading).
+func set_chunk_back_walls(chunk_coord: Vector2i, walls: Dictionary) -> void:
+	var origin := chunk_to_world(chunk_coord)
+	for local_pos in walls:
+		var wpos: Vector2i = origin + Vector2i(local_pos)
+		if walls[local_pos] == 0:  # EMPTY
+			back_wall_tiles.erase(wpos)
+		else:
+			back_wall_tiles[wpos] = walls[local_pos]
 
 
 # --- Chunk coordinate helpers ---

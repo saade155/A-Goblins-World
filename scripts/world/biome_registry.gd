@@ -33,6 +33,14 @@ func get_biome(cell_value: float, depth: int, temperature: float) -> BiomeData:
 	return default_biome
 
 
+## Look up a biome by its string ID. Returns default_biome if not found.
+func get_biome_by_id(biome_id: StringName) -> BiomeData:
+	for biome in biomes:
+		if biome.id == biome_id:
+			return biome
+	return default_biome
+
+
 func _register_all_biomes() -> void:
 	# --- 1. Standard Caverns (default - reproduces existing generation) ---
 	default_biome = _create_biome(&"standard_caverns", "Standard Caverns",
@@ -95,8 +103,9 @@ func _register_all_biomes() -> void:
 	biomes.append(frozen)
 
 	# --- 6. Volcanic Depths ---
+	# Extended depth and cell range to fill space left by removed Abyss biome.
 	var volcanic := _create_biome(&"volcanic_depths", "Volcanic Depths",
-		200, 600, 0.45, 0.65, 1,
+		200, 999, 0.45, 0.75, 1,
 		TileDatabase.TileType.VOLCANIC_ROCK, TileDatabase.TileType.OBSIDIAN, 0.2)
 	volcanic.cave_density_modifier = 1.3
 	volcanic.ore_rules = [
@@ -109,8 +118,9 @@ func _register_all_biomes() -> void:
 	biomes.append(volcanic)
 
 	# --- 7. Crystal Caverns ---
+	# Extended depth and cell range to fill space left by removed Abyss biome.
 	var crystal := _create_biome(&"crystal_caverns", "Crystal Caverns",
-		250, 600, 0.87, 0.95, 0,
+		250, 999, 0.75, 0.95, 0,
 		TileDatabase.TileType.HARD_STONE, TileDatabase.TileType.CRYSTAL, 0.4)
 	crystal.cave_density_modifier = 1.1
 	crystal.ore_rules = [
@@ -119,18 +129,6 @@ func _register_all_biomes() -> void:
 	]
 	crystal.exclusive_ores = true
 	biomes.append(crystal)
-
-	# --- 8. The Abyss ---
-	var abyss := _create_biome(&"the_abyss", "The Abyss",
-		400, 999, 0.65, 0.87, 0,
-		TileDatabase.TileType.DEEP_ROCK, TileDatabase.TileType.OBSIDIAN, 0.15)
-	abyss.cave_density_modifier = 1.4
-	abyss.ore_rules = [
-		{"tile_type": TileDatabase.TileType.CRYSTAL, "noise_index": 3, "threshold": 0.7, "min_depth": 400},
-		{"tile_type": TileDatabase.TileType.GOLD_ORE, "noise_index": 2, "threshold": 0.75, "min_depth": 400},
-	]
-	abyss.exclusive_ores = true
-	biomes.append(abyss)
 
 
 func _create_biome(id: StringName, biome_name: String,

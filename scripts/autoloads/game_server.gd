@@ -32,6 +32,12 @@ signal damage_dealt(source: Node, target: Node, amount: float, damage_type: Stri
 ## Emitted when an entity is killed.
 signal entity_killed(source: Node, target: Node, weapon: String)
 
+## Emitted when a back wall tile is successfully mined.
+signal back_wall_mined(position: Vector2i, tile_type: int)
+
+## Emitted when a back wall tile is successfully placed.
+signal back_wall_placed(position: Vector2i, tile_type: int)
+
 ## Emitted when a torch is placed.
 signal torch_placed(position: Vector2i)
 
@@ -66,10 +72,10 @@ var inventory_hotbar: Array[Dictionary] = []
 var selected_hotbar_slot: int = 0
 
 ## Maximum distance (in pixels) a player can be from a tile to interact with it.
-const INTERACTION_RANGE: float = 96.0  # 3 tiles * 32 pixels
+const INTERACTION_RANGE: float = 96.0  # 6 tiles * 16 pixels
 
 ## Tile size in pixels — must match the TileSet and WorldData coordinate system.
-const TILE_SIZE: int = 32
+const TILE_SIZE: int = 16
 
 ## Inventory slot counts.
 const MAIN_SLOTS: int = 30
@@ -131,6 +137,38 @@ func request_mine(player: Node, world_pos: Vector2i, tool_power: float) -> bool:
 	return true
 
 
+## Request to mine a back wall tile at the given world tile position.
+## Can only mine back walls when the foreground tile is empty.
+## Returns true if the mine was successful, false if validation failed.
+func request_mine_back_wall(player: Node, world_pos: Vector2i) -> bool:
+	if world_data == null:
+		return false
+
+	# Validate: back wall exists at this position.
+	if not world_data.has_back_wall(world_pos):
+		return false
+
+	# Validate: foreground must be empty (can't mine back wall through solid tile).
+	if world_data.has_tile(world_pos):
+		return false
+
+	# Validate: player is close enough.
+	var tile_center := Vector2(world_pos.x * TILE_SIZE + TILE_SIZE / 2.0, world_pos.y * TILE_SIZE + TILE_SIZE / 2.0)
+	var player_pos := (player as Node2D).global_position
+	if player_pos.distance_to(tile_center) > INTERACTION_RANGE:
+		return false
+
+	# Valid mine -- get the type before removing.
+	var wall_type: int = world_data.get_back_wall(world_pos)
+	world_data.remove_back_wall(world_pos)
+
+	# Emit signal so the world scene can update visuals and spawn drops.
+	back_wall_mined.emit(world_pos, wall_type)
+
+	print("[GameServer] Back wall mined at %s (type %d)" % [str(world_pos), wall_type])
+	return true
+
+
 ## Request to place a tile at the given world tile position.
 ## Returns true if placement was successful, false if validation failed.
 func request_place(player: Node, world_pos: Vector2i, tile_type: int) -> bool:
@@ -157,13 +195,15 @@ func request_place(player: Node, world_pos: Vector2i, tile_type: int) -> bool:
 	if distance > INTERACTION_RANGE:
 		return false
 
-	# Valid place -- set tile in world data.
-	world_data.set_tile(world_pos, tile_type)
-
-	# Emit signal so the world scene can update visuals.
-	tile_placed.emit(world_pos, tile_type)
-
-	print("[GameServer] Tile placed at %s (type %d)" % [str(world_pos), tile_type])
+	# Place as back wall first if none exists, otherwise place as foreground.
+	if not world_data.has_back_wall(world_pos):
+		world_data.set_back_wall(world_pos, tile_type)
+		back_wall_placed.emit(world_pos, tile_type)
+		print("[GameServer] Back wall placed at %s (type %d)" % [str(world_pos), tile_type])
+	else:
+		world_data.set_tile(world_pos, tile_type)
+		tile_placed.emit(world_pos, tile_type)
+		print("[GameServer] Tile placed at %s (type %d)" % [str(world_pos), tile_type])
 	return true
 
 

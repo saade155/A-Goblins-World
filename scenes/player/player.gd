@@ -83,8 +83,8 @@ var _distance_initialized: bool = false
 ## 1.5x = 3:1 (medium close), 2.0x = 4:1 (detail).
 const ZOOM_LEVELS: Array[float] = [1.0, 2.0, 3.0]
 
-## Current index into ZOOM_LEVELS (default = 0 → 1.0x zoom).
-var _zoom_index: int = 0
+## Current index into ZOOM_LEVELS (default = 1 → 2.0x zoom).
+var _zoom_index: int = 1
 
 # --- UI Panels ---
 

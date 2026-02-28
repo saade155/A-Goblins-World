@@ -28,6 +28,9 @@ var mine_progress: float = 0.0
 ## The hardness of the currently targeted tile (how much progress needed to break it).
 var target_hardness: float = 0.0
 
+## Whether the current mining target is a back wall (true) or foreground tile (false).
+var _mining_back_wall: bool = false
+
 ## Cached reference to the tile highlight sprite.
 @onready var _highlight: Sprite2D = $TileHighlight
 
@@ -35,7 +38,7 @@ var target_hardness: float = 0.0
 @onready var _progress_indicator: Sprite2D = $ProgressIndicator
 
 ## Tile size in pixels.
-const TILE_SIZE: int = 32
+const TILE_SIZE: int = 16
 
 
 func _ready() -> void:
@@ -76,6 +79,8 @@ func _process(delta: float) -> void:
 		# Tint based on whether there's a tile there.
 		if GameServer.world_data.has_tile(tile_coord):
 			_highlight.self_modulate = Color(1.0, 1.0, 0.3, 0.3)  # Yellow for minable
+		elif GameServer.world_data.has_back_wall(tile_coord):
+			_highlight.self_modulate = Color(0.8, 0.6, 0.3, 0.25)  # Orange for back wall
 		else:
 			_highlight.self_modulate = Color(0.3, 1.0, 0.3, 0.2)  # Green for placeable
 	else:
@@ -83,13 +88,22 @@ func _process(delta: float) -> void:
 
 	# --- Mining logic ---
 	if in_range and InputManager.is_mine_pressed():
-		# Check if we have a valid target tile to mine.
-		if GameServer.world_data.has_tile(tile_coord):
+		# Determine what to mine: foreground tile first, then back wall.
+		var has_foreground: bool = GameServer.world_data.has_tile(tile_coord)
+		var has_back_wall: bool = GameServer.world_data.has_back_wall(tile_coord)
+		var is_mining_back_wall: bool = not has_foreground and has_back_wall
+
+		if has_foreground or is_mining_back_wall:
 			if tile_coord != current_target:
 				# Target changed -- reset progress.
 				current_target = tile_coord
 				mine_progress = 0.0
-				var tile_type: int = GameServer.world_data.get_tile(tile_coord)
+				_mining_back_wall = is_mining_back_wall
+				var tile_type: int
+				if is_mining_back_wall:
+					tile_type = GameServer.world_data.get_back_wall(tile_coord)
+				else:
+					tile_type = GameServer.world_data.get_tile(tile_coord)
 				target_hardness = TileDatabase.get_hardness(tile_type)
 
 			# Accumulate mining progress.
@@ -105,11 +119,15 @@ func _process(delta: float) -> void:
 
 			# Check if mining is complete.
 			if mine_progress >= target_hardness:
-				var success := GameServer.request_mine(get_parent(), current_target, base_mine_speed)
+				var success: bool
+				if _mining_back_wall:
+					success = GameServer.request_mine_back_wall(get_parent(), current_target)
+				else:
+					success = GameServer.request_mine(get_parent(), current_target, base_mine_speed)
 				if success:
 					_reset_mining()
 		else:
-			# No tile to mine at this position.
+			# No tile or back wall to mine at this position.
 			# Check for torch removal before resetting.
 			if GameServer.world_data.has_torch(tile_coord):
 				GameServer.request_remove_torch(get_parent(), tile_coord)
@@ -140,4 +158,5 @@ func _reset_mining() -> void:
 	current_target = Vector2i(-1, -1)
 	mine_progress = 0.0
 	target_hardness = 0.0
+	_mining_back_wall = false
 	_progress_indicator.visible = false
