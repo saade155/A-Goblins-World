@@ -227,6 +227,49 @@ func load_world_meta() -> Variant:
 
 
 # ===========================================================================
+#  World cache (full tile data saved after first generation)
+# ===========================================================================
+
+## Save full world tile data to cache file after first generation.
+## Stores tiles, back walls, and torches so future loads skip regeneration.
+func save_world_cache(world_data_ref) -> void:
+	var path: String = _get_world_path() + "world_cache.dat"
+	_ensure_directory(_get_world_path())
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if not file:
+		push_error("[SaveManager] Failed to save world cache: %s" % error_string(FileAccess.get_open_error()))
+		return
+	var data: Dictionary = {
+		"version": SAVE_VERSION,
+		"tiles": world_data_ref.tiles,
+		"back_wall_tiles": world_data_ref.back_wall_tiles,
+		"torches": world_data_ref.torches,
+	}
+	file.store_var(data)
+	file.close()
+	print("[SaveManager] World cache saved.")
+
+
+## Load full world tile data from cache. Returns Dictionary or null.
+## Rejects caches from older save versions to avoid stale data.
+func load_world_cache() -> Variant:
+	var path: String = _get_world_path() + "world_cache.dat"
+	if not FileAccess.file_exists(path):
+		return null
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return null
+	var data = file.get_var()
+	file.close()
+	if data == null or not data is Dictionary:
+		return null
+	if data.get("version", 0) < SAVE_VERSION:
+		return null
+	print("[SaveManager] World cache loaded.")
+	return data
+
+
+# ===========================================================================
 #  Session state (current/state.dat — player pos, inventory, playtime)
 # ===========================================================================
 

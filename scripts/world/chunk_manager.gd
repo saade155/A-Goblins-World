@@ -36,17 +36,18 @@ const UNLOAD_BUFFER: int = 3
 ## Pixel size of a full chunk (CHUNK_SIZE * TILE_SIZE).
 const PIXEL_CHUNK_SIZE: int = CHUNK_SIZE * TILE_SIZE  # 512
 
-## Torch light radius in tiles.
-const TORCH_RADIUS: int = 8
-
-## Maximum light level a torch emits at its center.
-const TORCH_LIGHT_LEVEL: float = 1.0
-
-## Falloff exponent for torch light attenuation.
-const TORCH_FALLOFF_POWER: float = 1.4
-
-## Minimum ambient light level deep underground.
-const AMBIENT_FLOOR: float = 0.03
+## Maximum light level (sunlight).
+const MAX_LIGHT: int = 40
+## Sunlight level (unobstructed sky).
+const SUN_LIGHT: int = 40
+## Torch light emission level.
+const TORCH_LIGHT: int = 28
+## Light reduction when passing through an air tile.
+const AIR_REDUCTION: int = 2
+## Light reduction when passing through a solid tile (sun + torches).
+const SOLID_REDUCTION: int = 8
+## Light reduction through solid tiles for player lantern (walls block harder).
+const PLAYER_SOLID_REDUCTION: int = 14
 
 ## Z-index for the back wall tile layer (behind foreground).
 const BACK_WALL_Z_INDEX: int = -10
@@ -111,6 +112,15 @@ var _torch_scene: PackedScene
 ## Active torch visual nodes. Key = world tile position, value = Node2D instance.
 var active_torches: Dictionary = {}
 
+## Static light map (sun + torches). Key = world tile Vector2i, value = light level 0-20.
+var static_light_map: Dictionary = {}
+## Player dynamic light map. Key = world tile Vector2i, value = light level 0-20.
+var player_light_map: Dictionary = {}
+## Current player lantern light level (placeholder, will come from equipment later).
+var _player_light_level: int = 28
+## Last tile where player light was computed, to avoid redundant recalculation.
+var _last_player_light_tile: Vector2i = Vector2i(999999, 999999)
+
 ## Saving overlay UI (small bottom-right indicator).
 var _saving_overlay: CanvasLayer
 
@@ -134,6 +144,9 @@ var _last_fog_pos: Vector2 = Vector2(-99999, -99999)
 
 ## Whether the current world gen is a save load (for loading overlay text).
 var _is_loading_save: bool = false
+
+## Whether world data was loaded from cache (skip dirty chunk overlay).
+var _loaded_from_cache: bool = false
 
 ## Background thread for chunk data generation (noise calculations).
 var _generation_thread: Thread = null
@@ -261,15 +274,31 @@ func _ready() -> void:
 	_saving_overlay = preload("res://scenes/ui/saving_overlay.tscn").instantiate()
 	add_child(_saving_overlay)
 
-	# For finite worlds, always regenerate tile data from the seed. Only dirty
-	# (player-modified) chunks are persisted to disk — the rest is deterministic
-	# from the seed and gets regenerated on every load. New games also set spawn.
+	# For finite worlds, try loading the world cache first (skips regeneration).
+	# If no cache exists (new world or first load), generate from seed and cache.
 	if ws >= 0:
 		if not _is_existing_save:
 			@warning_ignore("integer_division")
 			var center_x: int = world_data.world_width / 2
 			GameState.saved_player_position = Vector2(center_x * TILE_SIZE, GameState.start_depth * TILE_SIZE)
-		_start_world_generation(_is_existing_save)
+
+		# Try loading cached world data (skips regeneration)
+		var cache = save_manager.load_world_cache()
+		if cache != null:
+			world_data.tiles = cache["tiles"]
+			world_data.back_wall_tiles = cache["back_wall_tiles"]
+			world_data.torches = cache["torches"]
+			_loaded_from_cache = true
+			# Signal that world data is ready — skip to chunk loading
+			_first_load = true
+			# Show loading overlay
+			_loading_overlay = get_tree().current_scene.get_node_or_null("LoadingOverlay")
+			if _loading_overlay:
+				_loading_overlay.set_progress_text("Loading chunks...")
+			print("[ChunkManager] World loaded from cache, skipping generation.")
+			_recompute_static_light()
+		else:
+			_start_world_generation(_is_existing_save)
 
 
 func _start_world_generation(is_loading_save: bool = false) -> void:
@@ -302,8 +331,11 @@ func _process(_delta: float) -> void:
 			if _world_gen_thread:
 				_world_gen_thread.wait_to_finish()
 				_world_gen_thread = null
+			# Cache the generated world for fast future loads
+			save_manager.save_world_cache(world_data)
 			print("[ChunkManager] Finite world generation complete.")
 			print("[ChunkManager] World data tiles: %d" % world_data.tiles.size())
+			_recompute_static_light()
 			# Reset player to intended spawn (they may have drifted during generation)
 			if GameState.player and GameState.saved_player_position != null:
 				GameState.player.global_position = GameState.saved_player_position
@@ -350,6 +382,11 @@ func _process(_delta: float) -> void:
 	if _first_load:
 		# Force-load all chunks synchronously on first frame (no pop-in on game load).
 		# This runs behind the loading screen so stutter doesn't matter.
+		# Re-pin player position — physics may have drifted them during the
+		# frame gap between world gen completing and chunks being created.
+		if GameState.player and GameState.saved_player_position != null:
+			GameState.player.global_position = GameState.saved_player_position
+			GameState.player.velocity = Vector2.ZERO
 		# Phase 1: Generate all chunk data first (so neighbors exist)
 		for chunk_coord in chunks_to_generate:
 			if _is_chunk_needed(chunk_coord):
@@ -406,6 +443,8 @@ func _process(_delta: float) -> void:
 	)
 	if player_tile != _last_fog_player_tile:
 		_last_fog_player_tile = player_tile
+		# Recompute player dynamic light when tile changes
+		_update_player_light(player_tile)
 
 	# Update fog darkness whenever player moves more than 2 pixels (sub-tile smoothing)
 	var cur_fog_pos: Vector2 = GameState.player.global_position
@@ -506,28 +545,33 @@ func _generate_chunk_data(chunk_coord: Vector2i) -> void:
 		generated_chunks[chunk_coord] = true
 		return
 
-	# Check for saved chunk first (player-modified chunks saved to disk)
-	var saved_data = save_manager.load_chunk(chunk_coord)
-	if saved_data != null:
-		world_data.set_chunk_tiles(chunk_coord, saved_data["tiles"])
-		# Restore back walls from save
-		if saved_data.has("back_walls"):
-			world_data.set_chunk_back_walls(chunk_coord, saved_data["back_walls"])
-		# Restore torches
-		for tpos in saved_data["torches"]:
-			world_data.torches[tpos] = true
-		world_data.dirty_chunks[chunk_coord] = true
-	elif world_data.world_width > 0:
-		# Finite world: tiles were pre-generated by generate_world().
-		# Back walls are already in world_data.back_wall_tiles from generate_world().
-		# Just apply structure overrides (spawn chamber, etc.)
-		_apply_structure_tiles_to_chunk(chunk_coord)
+	# When loaded from cache, world_data already has correct tiles (including
+	# player modifications). Skip dirty chunk loading and structure application.
+	if _loaded_from_cache:
+		pass  # Tiles, back walls, and torches already correct in world_data
 	else:
-		# Legacy infinite world: generate fresh from seed
-		var chunk_data: Dictionary = world_generator.generate_chunk(chunk_coord)
-		world_data.set_chunk_tiles(chunk_coord, chunk_data["tiles"])
-		world_data.set_chunk_back_walls(chunk_coord, chunk_data["back_walls"])
-		_apply_structure_tiles_to_chunk(chunk_coord)
+		# Check for saved chunk first (player-modified chunks saved to disk)
+		var saved_data = save_manager.load_chunk(chunk_coord)
+		if saved_data != null:
+			world_data.set_chunk_tiles(chunk_coord, saved_data["tiles"])
+			# Restore back walls from save
+			if saved_data.has("back_walls"):
+				world_data.set_chunk_back_walls(chunk_coord, saved_data["back_walls"])
+			# Restore torches
+			for tpos in saved_data["torches"]:
+				world_data.torches[tpos] = true
+			world_data.dirty_chunks[chunk_coord] = true
+		elif world_data.world_width > 0:
+			# Finite world: tiles were pre-generated by generate_world().
+			# Back walls are already in world_data.back_wall_tiles from generate_world().
+			# Just apply structure overrides (spawn chamber, etc.)
+			_apply_structure_tiles_to_chunk(chunk_coord)
+		else:
+			# Legacy infinite world: generate fresh from seed
+			var chunk_data: Dictionary = world_generator.generate_chunk(chunk_coord)
+			world_data.set_chunk_tiles(chunk_coord, chunk_data["tiles"])
+			world_data.set_chunk_back_walls(chunk_coord, chunk_data["back_walls"])
+			_apply_structure_tiles_to_chunk(chunk_coord)
 	generated_chunks[chunk_coord] = true
 
 
@@ -695,6 +739,9 @@ func _on_tile_mined(world_pos: Vector2i, tile_type: int, _tool_used: String) -> 
 	# Fog of war: mining opens new sightlines, refresh darkness next frame
 	_update_fog_darkness()
 
+	# Recompute static light (tile removal changes light propagation paths)
+	_recompute_static_light()
+
 
 ## Called when a tile is placed via GameServer. Update the visual tilemap.
 func _on_tile_placed(world_pos: Vector2i, tile_type: int) -> void:
@@ -707,6 +754,9 @@ func _on_tile_placed(world_pos: Vector2i, tile_type: int) -> void:
 
 	# Update neighbor visuals
 	_update_neighbor_visuals(world_pos)
+
+	# Recompute static light (tile placement blocks light propagation paths)
+	_recompute_static_light()
 
 
 ## Called when a back wall is mined via GameServer. Update visuals and spawn a drop.
@@ -859,111 +909,95 @@ func _update_single_tile_visual(world_pos: Vector2i, tile_type: int) -> void:
 
 # --- Per-tile lighting ---
 
-## Get ambient light level for a given world tile Y coordinate.
-## Same depth breakpoints as the old CanvasModulate system but per-tile.
-func _get_ambient_for_depth(wy: int) -> float:
-	if wy < 0:
-		return 1.0
-	elif wy < 80:
-		return lerpf(1.0, 0.7, float(wy) / 80.0)
-	elif wy < 200:
-		return lerpf(0.7, 0.4, float(wy - 80) / 120.0)
-	elif wy < 400:
-		return lerpf(0.4, 0.15, float(wy - 200) / 200.0)
-	else:
-		return lerpf(0.15, AMBIENT_FLOOR, clampf(float(wy - 400) / 400.0, 0.0, 1.0))
+## Flood sunlight downward through all air columns. Any air tile with clear sky
+## above gets SUN_LIGHT (20). Stops at the first solid tile per column.
+func _compute_sunlight() -> void:
+	var sr: int = world_data.surface_rows
+	var w: int = world_data.world_width
+	var h: int = world_data.world_height
+	for wx in range(w):
+		# Scan downward from above the surface through air
+		for wy in range(-sr, h - sr):
+			var pos := Vector2i(wx, wy)
+			if world_data.has_tile(pos):
+				break  # Hit solid ground, stop this column
+			static_light_map[pos] = SUN_LIGHT
 
 
-## Euclidean distance between two tile positions.
-func _tile_distance(x1: int, y1: int, x2: int, y2: int) -> float:
-	var dx: float = float(x1 - x2)
-	var dy: float = float(y1 - y2)
-	return sqrt(dx * dx + dy * dy)
+## BFS propagation of static light (sunlight + torches) into walls and through air.
+## Air tiles reduce light by AIR_REDUCTION (1), solid tiles by SOLID_REDUCTION (5).
+func _propagate_static_light() -> void:
+	# Initialize BFS queue with all existing light sources
+	var queue: Array[Vector2i] = []
+
+	# Add all sunlit tiles (already in static_light_map from _compute_sunlight)
+	for pos in static_light_map:
+		queue.append(pos)
+
+	# Add torch sources
+	for torch_pos in world_data.torches:
+		var current: int = static_light_map.get(torch_pos, 0)
+		if TORCH_LIGHT > current:
+			static_light_map[torch_pos] = TORCH_LIGHT
+			queue.append(torch_pos)
+
+	# BFS propagation
+	var neighbors := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	var idx: int = 0
+	while idx < queue.size():
+		var pos: Vector2i = queue[idx]
+		idx += 1
+		var current_level: int = static_light_map.get(pos, 0)
+		if current_level <= 1:
+			continue  # Can't propagate further
+		for offset in neighbors:
+			var neighbor: Vector2i = pos + offset
+			var is_solid: bool = world_data.has_tile(neighbor)
+			var reduction: int = SOLID_REDUCTION if is_solid else AIR_REDUCTION
+			var new_level: int = current_level - reduction
+			if new_level > 0 and new_level > static_light_map.get(neighbor, 0):
+				static_light_map[neighbor] = new_level
+				queue.append(neighbor)
 
 
-## Calculate torch light for a tile (no ambient — player proximity handles that).
-## Torch light only reaches tiles with an unobstructed path (no solid walls between).
-func _calculate_tile_light(wx: int, wy: int, nearby_torches: Array) -> float:
-	var best_torch: float = 0.0
-	for torch_pos in nearby_torches:
-		var dist: float = _tile_distance(wx, wy, torch_pos.x, torch_pos.y)
-		if dist < TORCH_RADIUS:
-			if not _has_light_path(torch_pos, wx, wy):
-				continue
-			var t: float = dist / float(TORCH_RADIUS)
-			var contribution: float = TORCH_LIGHT_LEVEL * (1.0 - pow(t, TORCH_FALLOFF_POWER))
-			if contribution > best_torch:
-				best_torch = contribution
-	return best_torch
+## Recompute player dynamic light via BFS from the player's tile position.
+## Uses the same propagation rules as static light (air -1, solid -5).
+func _update_player_light(tile_pos: Vector2i) -> void:
+	player_light_map.clear()
+	if _player_light_level <= 0:
+		return
+	player_light_map[tile_pos] = _player_light_level
+	var queue: Array[Vector2i] = [tile_pos]
+	var neighbors := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	var idx: int = 0
+	while idx < queue.size():
+		var pos: Vector2i = queue[idx]
+		idx += 1
+		var current_level: int = player_light_map.get(pos, 0)
+		if current_level <= 1:
+			continue
+		for offset in neighbors:
+			var neighbor: Vector2i = pos + offset
+			var is_solid: bool = world_data.has_tile(neighbor)
+			var reduction: int = PLAYER_SOLID_REDUCTION if is_solid else AIR_REDUCTION
+			var new_level: int = current_level - reduction
+			if new_level > 0 and new_level > player_light_map.get(neighbor, 0):
+				player_light_map[neighbor] = new_level
+				queue.append(neighbor)
+	_last_player_light_tile = tile_pos
 
 
-## Bresenham trace from light source to target tile. Returns true if no solid
-## tile blocks the path. The target tile itself can be solid (wall face lit).
-func _has_light_path(from: Vector2i, tx: int, ty: int) -> bool:
-	if from.x == tx and from.y == ty:
-		return true
-
-	var dx: int = absi(tx - from.x)
-	var dy: int = absi(ty - from.y)
-	var sx: int = 1 if from.x < tx else -1
-	var sy: int = 1 if from.y < ty else -1
-	var err: int = dx - dy
-	var x: int = from.x
-	var y: int = from.y
-
-	while true:
-		var e2: int = 2 * err
-		if e2 > -dy:
-			err -= dy
-			x += sx
-		if e2 < dx:
-			err += dx
-			y += sy
-
-		if x == tx and y == ty:
-			return true
-
-		if world_data.has_tile(Vector2i(x, y)):
-			return false
-
-	return true
+## Full recomputation of static light map (sunlight + torches).
+func _recompute_static_light() -> void:
+	static_light_map.clear()
+	_compute_sunlight()
+	_propagate_static_light()
 
 
-## Gather torch positions from a chunk and its 8 neighbors that could bleed
-## light into this chunk (within TORCH_RADIUS of the chunk boundary).
-func _gather_torches_for_chunk(chunk_coord: Vector2i) -> Array:
-	var result: Array = []
-	for dx in range(-1, 2):
-		for dy in range(-1, 2):
-			var neighbor := Vector2i(chunk_coord.x + dx, chunk_coord.y + dy)
-			var torch_list: Array = world_data.get_chunk_torches(neighbor)
-			if dx == 0 and dy == 0:
-				# Same chunk: include all torches
-				result.append_array(torch_list)
-			else:
-				# Neighbor chunk: only include torches close enough to bleed in
-				var origin: Vector2i = WorldData.chunk_to_world(chunk_coord)
-				for tpos in torch_list:
-					# Check if torch is within TORCH_RADIUS of any edge of our chunk
-					var closest_x: int = clampi(tpos.x, origin.x, origin.x + CHUNK_SIZE - 1)
-					var closest_y: int = clampi(tpos.y, origin.y, origin.y + CHUNK_SIZE - 1)
-					if _tile_distance(tpos.x, tpos.y, closest_x, closest_y) < TORCH_RADIUS:
-						result.append(tpos)
-	return result
-
-
-## Find which loaded chunks could be affected by a torch at the given position.
-func _get_affected_chunks(torch_pos: Vector2i) -> Array[Vector2i]:
-	var result: Array[Vector2i] = []
-	# Check all positions within TORCH_RADIUS to find unique chunks
-	var min_chunk := WorldData.world_to_chunk(Vector2i(torch_pos.x - TORCH_RADIUS, torch_pos.y - TORCH_RADIUS))
-	var max_chunk := WorldData.world_to_chunk(Vector2i(torch_pos.x + TORCH_RADIUS, torch_pos.y + TORCH_RADIUS))
-	for cx in range(min_chunk.x, max_chunk.x + 1):
-		for cy in range(min_chunk.y, max_chunk.y + 1):
-			var cc := Vector2i(cx, cy)
-			if active_chunks.has(cc):
-				result.append(cc)
-	return result
+## Get the combined light level at a world position (0-20).
+## Used by gameplay systems (mob spawning, etc.).
+func get_light_level(world_pos: Vector2i) -> int:
+	return maxi(static_light_map.get(world_pos, 0), player_light_map.get(world_pos, 0))
 
 
 ## Create a darkness overlay Sprite2D for a chunk. The image is 34x34 (32 + 1px
@@ -990,18 +1024,14 @@ func _create_darkness_overlay(chunk_coord: Vector2i) -> void:
 	chunk_darkness_sprites[chunk_coord] = sprite
 
 
-## Fill a 34x34 image with darkness alpha values based on per-tile lighting.
+## Fill a 34x34 image with darkness alpha values from precomputed BFS light maps.
 ## The image has a 1-pixel border around the 32x32 chunk data so that LINEAR
 ## texture filtering can interpolate correctly at chunk boundaries.
-## Three light layers: fog (unexplored = black), player proximity (flood-fill),
-## and torch light (with wall occlusion). No ambient depth light.
+## Reads combined light level from static_light_map (sun + torches) and
+## player_light_map (dynamic lantern). Fog of war is still applied: unexplored
+## tiles are fully black regardless of light level.
 func _update_darkness_image(chunk_coord: Vector2i, img: Image) -> void:
 	var origin: Vector2i = WorldData.chunk_to_world(chunk_coord)
-	var nearby_torches: Array = _gather_torches_for_chunk(chunk_coord)
-	var player_pos_f: Vector2 = Vector2.ZERO
-	if GameState.player:
-		player_pos_f = GameState.player.global_position / float(TILE_SIZE)
-	var reveal_r: float = float(ExplorationTracker.REVEAL_RADIUS)
 	var img_size: int = CHUNK_SIZE + 2
 	for ix in range(img_size):
 		for iy in range(img_size):
@@ -1012,26 +1042,12 @@ func _update_darkness_image(chunk_coord: Vector2i, img: Image) -> void:
 			if not ExplorationTracker.is_tile_explored(wt):
 				img.set_pixel(ix, iy, Color(0.0, 0.0, 0.0, 1.0))
 				continue
-			# Surface daylight: tiles at or above ground level get full light
-			if wy <= 0:
-				img.set_pixel(ix, iy, Color(0.0, 0.0, 0.0, 0.0))
-				continue
-			# Underground: torch light (with wall occlusion)
-			var light: float = _calculate_tile_light(wx, wy, nearby_torches)
-			# Player proximity light — only for tiles currently visible via flood-fill
-			if ExplorationTracker.visible_tiles.has(wt):
-				var pdx: float = float(wx) + 0.5 - player_pos_f.x
-				var pdy: float = float(wy) + 0.5 - player_pos_f.y
-				var dist: float = sqrt(pdx * pdx + pdy * pdy)
-				if dist < reveal_r:
-					var player_light: float
-					if dist <= 1.5:
-						player_light = 0.8
-					else:
-						var t: float = (dist - 1.5) / (reveal_r - 1.5)
-						player_light = 0.8 * (1.0 - t * t)
-					light = maxf(light, player_light)
-			var darkness: float = 1.0 - clampf(light, 0.0, 1.0)
+			# Read combined light level from precomputed maps
+			var level: int = maxi(
+				static_light_map.get(wt, 0),
+				player_light_map.get(wt, 0)
+			)
+			var darkness: float = 1.0 - clampf(float(level) / float(MAX_LIGHT), 0.0, 1.0)
 			img.set_pixel(ix, iy, Color(0.0, 0.0, 0.0, darkness))
 
 
@@ -1065,11 +1081,17 @@ func _update_fog_darkness() -> void:
 				_update_chunk_lighting(cc)
 
 
-## Recalculate lighting for all loaded chunks affected by a torch change.
+## Recalculate lighting for all loaded chunks affected by a light change.
+## Uses MAX_LIGHT as the search radius since BFS light can propagate that far
+## through air (1 reduction per tile).
 func _recalculate_lighting_around(world_pos: Vector2i) -> void:
-	var affected: Array[Vector2i] = _get_affected_chunks(world_pos)
-	for cc in affected:
-		_update_chunk_lighting(cc)
+	var min_chunk := WorldData.world_to_chunk(Vector2i(world_pos.x - MAX_LIGHT, world_pos.y - MAX_LIGHT))
+	var max_chunk := WorldData.world_to_chunk(Vector2i(world_pos.x + MAX_LIGHT, world_pos.y + MAX_LIGHT))
+	for cx in range(min_chunk.x, max_chunk.x + 1):
+		for cy in range(min_chunk.y, max_chunk.y + 1):
+			var cc := Vector2i(cx, cy)
+			if active_chunks.has(cc):
+				_update_chunk_lighting(cc)
 
 
 # --- Depth tracking ---
@@ -1093,10 +1115,13 @@ func _save_dirty_chunks() -> void:
 			world_data.dirty_chunks[chunk_coord] = false
 
 
-## Save all dirty loaded chunks, world metadata, and behavior data.
-## Called before game exit.
+## Save all world data and session state. Called before game exit.
 func save_all() -> void:
 	_save_dirty_chunks()
+
+	# Update world cache with current state (includes player modifications)
+	if world_data.world_width > 0:
+		save_manager.save_world_cache(world_data)
 
 	# Save session state (player position, inventory, playtime)
 	var player_pos := Vector2.ZERO
@@ -1227,12 +1252,14 @@ func _remove_torch(world_pos: Vector2i) -> void:
 ## Called when GameServer confirms a torch was placed.
 func _on_torch_placed(world_pos: Vector2i) -> void:
 	_spawn_torch(world_pos)
+	_recompute_static_light()
 	_recalculate_lighting_around(world_pos)
 
 
 ## Called when GameServer confirms a torch was removed.
 func _on_torch_removed(world_pos: Vector2i) -> void:
 	_remove_torch(world_pos)
+	_recompute_static_light()
 	_recalculate_lighting_around(world_pos)
 
 
