@@ -142,3 +142,20 @@ func is_fly_toggle_just_pressed() -> bool:
 ## -1.0 = up (jump), 1.0 = down (move_down), 0.0 = no input.
 func get_fly_vertical_direction() -> float:
 	return Input.get_axis("jump", "move_down")
+
+
+# --- Hotbar scroll ---
+
+## Cycle hotbar selection via mouse wheel.
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_selected_hotbar = (_selected_hotbar - 1) % 10
+			if _selected_hotbar < 0:
+				_selected_hotbar = 9
+			hotbar_changed.emit(_selected_hotbar)
+			get_viewport().set_input_as_handled()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_selected_hotbar = (_selected_hotbar + 1) % 10
+			hotbar_changed.emit(_selected_hotbar)
+			get_viewport().set_input_as_handled()

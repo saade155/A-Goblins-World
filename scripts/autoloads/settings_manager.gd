@@ -8,13 +8,11 @@ extends Node
 
 # --- Constants ---
 
-## Available resolution options (descending).
-const RESOLUTIONS: Array[Vector2i] = [
-	Vector2i(1920, 1080),
-	Vector2i(1600, 900),
-	Vector2i(1280, 720),
-	Vector2i(960, 540),
-]
+## Window mode options: 0=Windowed, 1=Borderless Windowed, 2=Fullscreen.
+enum WindowMode { WINDOWED, BORDERLESS, FULLSCREEN }
+
+## Display names for window modes (used by settings UI).
+const WINDOW_MODE_NAMES: Array[String] = ["Windowed", "Borderless Windowed", "Fullscreen"]
 
 const SETTINGS_PATH := "user://settings.cfg"
 
@@ -31,11 +29,14 @@ var music_volume: float = 1.0
 
 # --- Video settings ---
 
-## Whether the game runs in fullscreen mode.
-var fullscreen: bool = false
+## Current window mode (WindowMode enum). Default: Borderless Windowed.
+var window_mode: int = WindowMode.BORDERLESS
 
-## Index into RESOLUTIONS for the current window size.
-var resolution_index: int = 0
+## Window size when in Windowed mode. Ignored for Borderless/Fullscreen.
+var windowed_resolution: Vector2i = Vector2i(1920, 1080)
+
+## Available resolutions for Windowed mode, built from monitor size on startup.
+var available_resolutions: Array[Vector2i] = []
 
 # --- Keybind settings ---
 
@@ -71,6 +72,7 @@ var _default_events: Dictionary = {}
 
 func _ready() -> void:
 	_capture_default_events()
+	_build_available_resolutions()
 	load_settings()
 	apply_all()
 	print("[SettingsManager] Initialized.")
@@ -82,6 +84,27 @@ func _capture_default_events() -> void:
 		var action: String = entry["action"]
 		if InputMap.has_action(action):
 			_default_events[action] = InputMap.action_get_events(action).duplicate()
+
+
+## Build the list of available resolutions based on the monitor size.
+## Includes standard 16:9 resolutions that fit on the current display.
+func _build_available_resolutions() -> void:
+	var screen_size := DisplayServer.screen_get_size()
+	var standard_resolutions: Array[Vector2i] = [
+		Vector2i(3840, 2160),
+		Vector2i(2560, 1440),
+		Vector2i(1920, 1080),
+		Vector2i(1600, 900),
+		Vector2i(1280, 720),
+		Vector2i(960, 540),
+	]
+	available_resolutions.clear()
+	for res in standard_resolutions:
+		if res.x <= screen_size.x and res.y <= screen_size.y:
+			available_resolutions.append(res)
+	# Ensure at least the base viewport size is available.
+	if available_resolutions.is_empty():
+		available_resolutions.append(Vector2i(960, 540))
 
 
 # --- Persistence ---
@@ -98,11 +121,11 @@ func load_settings() -> void:
 	sfx_volume = config.get_value("audio", "sfx_volume", 1.0)
 	music_volume = config.get_value("audio", "music_volume", 1.0)
 
-	fullscreen = config.get_value("video", "fullscreen", false)
-	resolution_index = config.get_value("video", "resolution_index", 0)
-
-	# Clamp to valid range.
-	resolution_index = clampi(resolution_index, 0, RESOLUTIONS.size() - 1)
+	window_mode = config.get_value("video", "window_mode", WindowMode.BORDERLESS)
+	window_mode = clampi(window_mode, 0, 2)
+	var res_x: int = config.get_value("video", "windowed_resolution_x", 1920)
+	var res_y: int = config.get_value("video", "windowed_resolution_y", 1080)
+	windowed_resolution = Vector2i(res_x, res_y)
 
 	# Load keybind overrides
 	keybind_overrides.clear()
@@ -121,8 +144,9 @@ func save_settings() -> void:
 	config.set_value("audio", "sfx_volume", sfx_volume)
 	config.set_value("audio", "music_volume", music_volume)
 
-	config.set_value("video", "fullscreen", fullscreen)
-	config.set_value("video", "resolution_index", resolution_index)
+	config.set_value("video", "window_mode", window_mode)
+	config.set_value("video", "windowed_resolution_x", windowed_resolution.x)
+	config.set_value("video", "windowed_resolution_y", windowed_resolution.y)
 
 	# Save keybind overrides
 	for action_name in keybind_overrides:
@@ -172,16 +196,21 @@ func _apply_audio() -> void:
 
 ## Apply video settings via DisplayServer.
 func _apply_video() -> void:
-	if fullscreen:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
-	else:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-		var res := RESOLUTIONS[resolution_index]
-		DisplayServer.window_set_size(res)
-		# Center the window on the primary screen.
-		var screen_size := DisplayServer.screen_get_size()
-		var win_pos := (screen_size - res) / 2
-		DisplayServer.window_set_position(win_pos)
+	# Always go windowed first to ensure clean transition on Windows.
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	match window_mode:
+		WindowMode.WINDOWED:
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+			DisplayServer.window_set_size(windowed_resolution)
+			var screen_size := DisplayServer.screen_get_size()
+			var win_pos := (screen_size - windowed_resolution) / 2
+			DisplayServer.window_set_position(win_pos)
+		WindowMode.BORDERLESS:
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		WindowMode.FULLSCREEN:
+			DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, false)
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
 
 
 # --- Keybind application ---

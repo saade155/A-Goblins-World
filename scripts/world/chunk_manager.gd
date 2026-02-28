@@ -736,11 +736,10 @@ func _on_tile_mined(world_pos: Vector2i, tile_type: int, _tool_used: String) -> 
 	# Update neighbor visuals (refresh their cell visual)
 	_update_neighbor_visuals(world_pos)
 
-	# Fog of war: mining opens new sightlines, refresh darkness next frame
+	# Update fog darkness (fast — only chunks around player)
 	_update_fog_darkness()
-
-	# Recompute static light (tile removal changes light propagation paths)
-	_recompute_static_light()
+	# Localized light recompute (fast — only ~2000 tiles around mined tile)
+	_recompute_light_local(world_pos)
 
 
 ## Called when a tile is placed via GameServer. Update the visual tilemap.
@@ -755,8 +754,7 @@ func _on_tile_placed(world_pos: Vector2i, tile_type: int) -> void:
 	# Update neighbor visuals
 	_update_neighbor_visuals(world_pos)
 
-	# Recompute static light (tile placement blocks light propagation paths)
-	_recompute_static_light()
+	_recompute_light_local(world_pos)
 
 
 ## Called when a back wall is mined via GameServer. Update visuals and spawn a drop.
@@ -770,7 +768,6 @@ func _on_back_wall_mined(world_pos: Vector2i, tile_type: int) -> void:
 	# Spawn dropped item for the mined back wall
 	_spawn_dropped_item(world_pos, tile_type)
 
-	# Fog of war: mining opens new sightlines, refresh darkness
 	_update_fog_darkness()
 
 
@@ -985,6 +982,91 @@ func _update_player_light(tile_pos: Vector2i) -> void:
 				player_light_map[neighbor] = new_level
 				queue.append(neighbor)
 	_last_player_light_tile = tile_pos
+
+
+## Recompute light in a localized area around a tile change.
+## Much faster than _recompute_static_light() — processes ~2000 tiles instead of 60,000+.
+## Used for gameplay events (mining, placing, torches). Full recompute reserved for init.
+func _recompute_light_local(center: Vector2i) -> void:
+	var RADIUS := 22  # MAX_LIGHT / AIR_REDUCTION + 2 margin
+	var min_x := center.x - RADIUS
+	var max_x := center.x + RADIUS
+	var min_y := center.y - RADIUS
+	var max_y := center.y + RADIUS
+
+	# Step 1: Clear light in local area
+	for x in range(min_x, max_x + 1):
+		for y in range(min_y, max_y + 1):
+			static_light_map.erase(Vector2i(x, y))
+
+	# Step 2: Reseed sunlight in local columns (scan from sky down)
+	var sr: int = world_data.surface_rows
+	var wh: int = world_data.world_height
+	for wx in range(min_x, max_x + 1):
+		for wy in range(-sr, wh - sr):
+			var pos := Vector2i(wx, wy)
+			if world_data.has_tile(pos):
+				break  # Hit solid — sunlight blocked in this column
+			if pos.y >= min_y and pos.y <= max_y:
+				static_light_map[pos] = SUN_LIGHT
+
+	# Step 3: Build BFS queue from seeds
+	var queue: Array[Vector2i] = []
+
+	# Seed from sunlit tiles we just placed in the local area
+	for x in range(min_x, max_x + 1):
+		for y in range(min_y, max_y + 1):
+			var pos := Vector2i(x, y)
+			if static_light_map.has(pos):
+				queue.append(pos)
+
+	# Seed from torches that could contribute light to the local area
+	for torch_pos in world_data.torches:
+		if torch_pos.x >= min_x and torch_pos.x <= max_x \
+				and torch_pos.y >= min_y and torch_pos.y <= max_y:
+			var current: int = static_light_map.get(torch_pos, 0)
+			if TORCH_LIGHT > current:
+				static_light_map[torch_pos] = TORCH_LIGHT
+				queue.append(torch_pos)
+
+	# Seed from boundary ring (light flowing in from outside the cleared area)
+	for x in range(min_x - 1, max_x + 2):
+		for border_y in [min_y - 1, max_y + 1]:
+			var pos := Vector2i(x, border_y)
+			if static_light_map.get(pos, 0) > 0:
+				queue.append(pos)
+	for y in range(min_y, max_y + 1):
+		for border_x in [min_x - 1, max_x + 1]:
+			var pos := Vector2i(border_x, y)
+			if static_light_map.get(pos, 0) > 0:
+				queue.append(pos)
+
+	# Step 4: BFS propagation (same algorithm as _propagate_static_light)
+	var neighbors := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	var idx: int = 0
+	while idx < queue.size():
+		var pos: Vector2i = queue[idx]
+		idx += 1
+		var current_level: int = static_light_map.get(pos, 0)
+		if current_level <= 1:
+			continue
+		for offset in neighbors:
+			var neighbor: Vector2i = pos + offset
+			var is_solid: bool = world_data.has_tile(neighbor)
+			var reduction: int = SOLID_REDUCTION if is_solid else AIR_REDUCTION
+			var new_level: int = current_level - reduction
+			if new_level > 0 and new_level > static_light_map.get(neighbor, 0):
+				static_light_map[neighbor] = new_level
+				queue.append(neighbor)
+
+	# Step 5: Update darkness textures for affected chunks only
+	var min_chunk := WorldData.world_to_chunk(Vector2i(min_x, min_y))
+	var max_chunk := WorldData.world_to_chunk(Vector2i(max_x, max_y))
+	for cx in range(min_chunk.x, max_chunk.x + 1):
+		for cy in range(min_chunk.y, max_chunk.y + 1):
+			var cc := Vector2i(cx, cy)
+			if chunk_darkness_sprites.has(cc):
+				_update_chunk_lighting(cc)
 
 
 ## Full recomputation of static light map (sunlight + torches).
@@ -1252,15 +1334,13 @@ func _remove_torch(world_pos: Vector2i) -> void:
 ## Called when GameServer confirms a torch was placed.
 func _on_torch_placed(world_pos: Vector2i) -> void:
 	_spawn_torch(world_pos)
-	_recompute_static_light()
-	_recalculate_lighting_around(world_pos)
+	_recompute_light_local(world_pos)
 
 
 ## Called when GameServer confirms a torch was removed.
 func _on_torch_removed(world_pos: Vector2i) -> void:
 	_remove_torch(world_pos)
-	_recompute_static_light()
-	_recalculate_lighting_around(world_pos)
+	_recompute_light_local(world_pos)
 
 
 # --- Utility ---

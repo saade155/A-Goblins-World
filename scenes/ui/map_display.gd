@@ -25,19 +25,19 @@ var bg: ColorRect
 
 # --- Map settings ---
 
-## Viewport dimensions.
-const VIEWPORT_WIDTH: int = 960
-const VIEWPORT_HEIGHT: int = 540
-const MAP_CENTER := Vector2(480, 270)
-
 ## Extra pixels rendered beyond viewport edges so dragging doesn't reveal black.
 const DRAG_PADDING: int = 256
 
+## Viewport dimensions (computed dynamically from actual viewport size).
+var viewport_width: int = 960
+var viewport_height: int = 540
+var map_center := Vector2(480, 270)
+
 ## Full buffer dimensions (viewport + padding on each side).
-const MAP_WIDTH: int = 1472  # 960 + 256 * 2
-const MAP_HEIGHT: int = 1052  # 540 + 256 * 2
-const MAP_HALF_W: int = 736  # MAP_WIDTH / 2
-const MAP_HALF_H: int = 526  # MAP_HEIGHT / 2
+var map_buf_width: int = 1472
+var map_buf_height: int = 1052
+var map_half_w: int = 736
+var map_half_h: int = 526
 
 # --- Zoom settings ---
 
@@ -72,16 +72,28 @@ var is_dragging: bool = false
 var drag_pixel_offset: Vector2 = Vector2.ZERO
 
 
+func _update_viewport_dimensions() -> void:
+	var vp_size: Vector2 = get_viewport().get_visible_rect().size
+	viewport_width = int(vp_size.x)
+	viewport_height = int(vp_size.y)
+	map_center = Vector2(viewport_width / 2.0, viewport_height / 2.0)
+	map_buf_width = viewport_width + DRAG_PADDING * 2
+	map_buf_height = viewport_height + DRAG_PADDING * 2
+	map_half_w = map_buf_width / 2
+	map_half_h = map_buf_height / 2
+
+
 func _ready() -> void:
 	layer = 10
 	visible = false
+	_update_viewport_dimensions()
 
 	# Build color lookup from TileDatabase
 	for tile_type in TileDatabase.get_tile_types():
 		tile_colors[tile_type] = TileDatabase.get_properties(tile_type)["color"]
 
 	# Create the map image and texture
-	map_image = Image.create(MAP_WIDTH, MAP_HEIGHT, false, Image.FORMAT_RGBA8)
+	map_image = Image.create(map_buf_width, map_buf_height, false, Image.FORMAT_RGBA8)
 	map_texture = ImageTexture.create_from_image(map_image)
 
 	# Dark background panel
@@ -94,7 +106,7 @@ func _ready() -> void:
 	# Map sprite centered on viewport
 	map_sprite = Sprite2D.new()
 	map_sprite.texture = map_texture
-	map_sprite.position = MAP_CENTER
+	map_sprite.position = map_center
 	map_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_child(map_sprite)
 
@@ -105,14 +117,19 @@ func _process(_delta: float) -> void:
 		is_open = not is_open
 		visible = is_open
 		if is_open:
+			_update_viewport_dimensions()
+			if map_image.get_width() != map_buf_width or map_image.get_height() != map_buf_height:
+				map_image = Image.create(map_buf_width, map_buf_height, false, Image.FORMAT_RGBA8)
+				map_texture = ImageTexture.create_from_image(map_image)
+				map_sprite.texture = map_texture
 			map_offset = Vector2i.ZERO
 			drag_pixel_offset = Vector2.ZERO
-			map_sprite.position = MAP_CENTER
+			map_sprite.position = map_center
 			_render_map()
 		else:
 			is_dragging = false
 			drag_pixel_offset = Vector2.ZERO
-			map_sprite.position = MAP_CENTER
+			map_sprite.position = map_center
 
 	# Toggle fog (re-render if map is open)
 	if InputManager.is_debug_fog_toggle_just_pressed():
@@ -147,7 +164,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				int(drag_pixel_offset.y) * zoom_level
 			)
 			drag_pixel_offset = Vector2.ZERO
-			map_sprite.position = MAP_CENTER
+			map_sprite.position = map_center
 			_render_map()
 		get_viewport().set_input_as_handled()
 
@@ -156,7 +173,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		drag_pixel_offset += event.relative
 		drag_pixel_offset.x = clampf(drag_pixel_offset.x, -DRAG_PADDING, DRAG_PADDING)
 		drag_pixel_offset.y = clampf(drag_pixel_offset.y, -DRAG_PADDING, DRAG_PADDING)
-		map_sprite.position = MAP_CENTER + drag_pixel_offset
+		map_sprite.position = map_center + drag_pixel_offset
 		get_viewport().set_input_as_handled()
 
 
@@ -187,8 +204,8 @@ func _render_map() -> void:
 	)
 
 	var center_tile: Vector2i = player_tile + map_offset
-	var half_w: int = MAP_HALF_W * zoom_level
-	var half_h: int = MAP_HALF_H * zoom_level
+	var half_w: int = map_half_w * zoom_level
+	var half_h: int = map_half_h * zoom_level
 	var map_origin_tile: Vector2i = center_tile - Vector2i(half_w, half_h)
 
 	# Clear to fog color
@@ -197,8 +214,8 @@ func _render_map() -> void:
 	var fog_disabled: bool = ExplorationTracker.debug_fog_disabled
 	var generator: WorldGenerator = GameState.world_generator
 
-	for px in range(MAP_WIDTH):
-		for py in range(MAP_HEIGHT):
+	for px in range(map_buf_width):
+		for py in range(map_buf_height):
 			var world_tile: Vector2i = map_origin_tile + Vector2i(px * zoom_level, py * zoom_level)
 
 			# Fog of war: skip unexplored tiles (unless fog is disabled)
@@ -224,13 +241,13 @@ func _render_map() -> void:
 				map_image.set_pixel(px, py, empty_color)
 
 	# Player marker (3x3 red dot). Position shifts when the view is panned.
-	var player_px: int = MAP_HALF_W - map_offset.x / zoom_level
-	var player_py: int = MAP_HALF_H - map_offset.y / zoom_level
+	var player_px: int = map_half_w - map_offset.x / zoom_level
+	var player_py: int = map_half_h - map_offset.y / zoom_level
 	for dx in range(-1, 2):
 		for dy in range(-1, 2):
 			var sx: int = player_px + dx
 			var sy: int = player_py + dy
-			if sx >= 0 and sx < MAP_WIDTH and sy >= 0 and sy < MAP_HEIGHT:
+			if sx >= 0 and sx < map_buf_width and sy >= 0 and sy < map_buf_height:
 				map_image.set_pixel(sx, sy, player_color)
 
 	map_texture.update(map_image)

@@ -53,6 +53,15 @@ signal hotbar_selection_changed(slot: int)
 ## Emitted when items could not be picked up (inventory full).
 signal inventory_full(item_id: String, amount: int)
 
+## Emitted when player health changes.
+signal player_health_changed(current: float, max_val: float)
+
+## Emitted when player mana changes.
+signal player_mana_changed(current: float, max_val: float)
+
+## Emitted when player stamina changes.
+signal player_stamina_changed(current: float, max_val: float)
+
 ## Emitted to request an event-triggered autosave (e.g., after boss kill, biome entry).
 ## ChunkManager listens and creates a rolling autosave snapshot.
 signal autosave_requested(reason: String)
@@ -70,6 +79,20 @@ var inventory_hotbar: Array[Dictionary] = []
 
 ## Currently selected hotbar index (0-9).
 var selected_hotbar_slot: int = 0
+
+# --- Player stats ---
+
+## Player health.
+var player_max_health: float = 100.0
+var player_health: float = 100.0
+
+## Player mana.
+var player_max_mana: float = 50.0
+var player_mana: float = 50.0
+
+## Player stamina.
+var player_max_stamina: float = 100.0
+var player_stamina: float = 100.0
 
 ## Maximum distance (in pixels) a player can be from a tile to interact with it.
 const INTERACTION_RANGE: float = 96.0  # 6 tiles * 16 pixels
@@ -91,6 +114,12 @@ func _ready() -> void:
 func reset_state() -> void:
 	world_data = null
 	selected_hotbar_slot = 0
+	player_max_health = 100.0
+	player_health = 100.0
+	player_max_mana = 50.0
+	player_mana = 50.0
+	player_max_stamina = 100.0
+	player_stamina = 100.0
 	_initialize_inventory()
 	print("[GameServer] State reset.")
 
@@ -568,3 +597,44 @@ func request_place_with_inventory(player: Node, world_pos: Vector2i, item_id: St
 	if placed:
 		request_remove_item(item_id, 1)
 	return placed
+
+
+# --- Player stat setters ---
+
+## Set player health, clamped to [0, max]. Emits signal.
+func set_player_health(value: float) -> void:
+	player_health = clampf(value, 0.0, player_max_health)
+	player_health_changed.emit(player_health, player_max_health)
+
+
+## Set player max health. Re-clamps current health. Emits signal.
+func set_player_max_health(value: float) -> void:
+	player_max_health = maxf(value, 1.0)
+	player_health = clampf(player_health, 0.0, player_max_health)
+	player_health_changed.emit(player_health, player_max_health)
+
+
+## Set player mana, clamped to [0, max]. Emits signal.
+func set_player_mana(value: float) -> void:
+	player_mana = clampf(value, 0.0, player_max_mana)
+	player_mana_changed.emit(player_mana, player_max_mana)
+
+
+## Set player max mana. Re-clamps current mana. Emits signal.
+func set_player_max_mana(value: float) -> void:
+	player_max_mana = maxf(value, 0.0)
+	player_mana = clampf(player_mana, 0.0, player_max_mana)
+	player_mana_changed.emit(player_mana, player_max_mana)
+
+
+## Set player stamina, clamped to [0, max]. Emits signal.
+func set_player_stamina(value: float) -> void:
+	player_stamina = clampf(value, 0.0, player_max_stamina)
+	player_stamina_changed.emit(player_stamina, player_max_stamina)
+
+
+## Set player max stamina. Re-clamps current stamina. Emits signal.
+func set_player_max_stamina(value: float) -> void:
+	player_max_stamina = maxf(value, 0.0)
+	player_stamina = clampf(player_stamina, 0.0, player_max_stamina)
+	player_stamina_changed.emit(player_stamina, player_max_stamina)

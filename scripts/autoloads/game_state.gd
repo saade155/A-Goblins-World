@@ -44,6 +44,9 @@ var world_size: int = -1
 
 
 func _ready() -> void:
+	# Cap physics catch-up to prevent snap-to-floor during frame stutters.
+	# Default is 8 — too aggressive for a single-player game.
+	Engine.max_physics_steps_per_frame = 4
 	print("[GameState] Initialized.")
 
 
@@ -60,8 +63,9 @@ func register_player(player_node: CharacterBody2D) -> void:
 		player_node.global_position = saved_player_position
 		print("[GameState] Player restored to saved position: %s" % str(saved_player_position))
 	else:
-		player_node.global_position = Vector2(0, start_depth * 16)
-		print("[GameState] Player registered at start_depth=%d (y=%d)" % [start_depth, start_depth * 16])
+		var center_x: float = _get_world_center_x()
+		player_node.global_position = Vector2(center_x, start_depth * 16)
+		print("[GameState] Player registered at center (%.0f, %d)" % [center_x, start_depth * 16])
 
 	# Safety check: nudge up if spawning inside solid tiles
 	_ensure_safe_spawn(player_node)
@@ -96,9 +100,17 @@ func _ensure_safe_spawn(player_node: CharacterBody2D) -> void:
 			print("[GameState] Player nudged to safe position: %s" % str(player_node.global_position))
 			return
 
-	# Fallback: spawn at start_depth surface
-	player_node.global_position = Vector2(0, start_depth * tile_size)
-	print("[GameState] Could not find safe position, falling back to spawn.")
+	# Fallback: spawn at world center at start_depth
+	var center_x: float = _get_world_center_x()
+	player_node.global_position = Vector2(center_x, start_depth * tile_size)
+	print("[GameState] Could not find safe position, falling back to world center.")
+
+
+## Get the horizontal center of the world in pixels. Falls back to 0 if world_data is unavailable.
+func _get_world_center_x() -> float:
+	if world_data and world_data.world_width > 0:
+		return (world_data.world_width / 2.0) * 16.0
+	return 0.0
 
 
 ## Unregister the player (e.g., on scene change or cleanup).

@@ -67,10 +67,10 @@ func _register_all_items() -> void:
 		var drop_item: String = props.get("drop_item", "")
 		if drop_item != "":
 			var can_place: bool = drop_item not in _NON_PLACEABLE_ITEMS
-			_register(drop_item, props.get("name", drop_item), ItemType.MATERIAL, 99, tile_type_id, can_place)
+			_register(drop_item, props.get("name", drop_item), ItemType.MATERIAL, 999, tile_type_id, can_place)
 
 	# Torch — placeable but not a tile type in TileDatabase (handled specially by ChunkManager)
-	_register("torch", "Torch", ItemType.PLACEABLE, 99, -1, true)
+	_register("torch", "Torch", ItemType.PLACEABLE, 999, -1, true)
 
 	# Future items will be registered here:
 	# Tools (M4E)

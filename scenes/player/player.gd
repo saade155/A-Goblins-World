@@ -192,13 +192,12 @@ func _physics_process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_zoom_index = mini(_zoom_index + 1, ZOOM_LEVELS.size() - 1)
-			_camera.zoom = Vector2(ZOOM_LEVELS[_zoom_index], ZOOM_LEVELS[_zoom_index])
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_zoom_index = maxi(_zoom_index - 1, 0)
-			_camera.zoom = Vector2(ZOOM_LEVELS[_zoom_index], ZOOM_LEVELS[_zoom_index])
+	if event.is_action_pressed("zoom_in"):
+		_zoom_index = mini(_zoom_index + 1, ZOOM_LEVELS.size() - 1)
+		_camera.zoom = Vector2(ZOOM_LEVELS[_zoom_index], ZOOM_LEVELS[_zoom_index])
+	elif event.is_action_pressed("zoom_out"):
+		_zoom_index = maxi(_zoom_index - 1, 0)
+		_camera.zoom = Vector2(ZOOM_LEVELS[_zoom_index], ZOOM_LEVELS[_zoom_index])
 
 
 # --- Debug fly mode ---
