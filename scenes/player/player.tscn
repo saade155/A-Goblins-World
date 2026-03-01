@@ -1,12 +1,17 @@
-[gd_scene load_steps=5 format=3 uid="uid://d0player00001"]
+[gd_scene load_steps=11 format=3 uid="uid://d0player00001"]
 
 [ext_resource type="Script" path="res://scenes/player/player.gd" id="1_player"]
-[ext_resource type="Texture2D" path="res://assets/characters/player_goblin_base.png" id="2_sprite"]
+[ext_resource type="Texture2D" path="res://assets/characters/template/back_arm.png" id="2_back_arm"]
+[ext_resource type="Texture2D" path="res://assets/characters/template/back_leg.png" id="3_back_leg"]
+[ext_resource type="Texture2D" path="res://assets/characters/template/chest.png" id="4_chest"]
+[ext_resource type="Texture2D" path="res://assets/characters/template/belt.png" id="5_belt"]
+[ext_resource type="Texture2D" path="res://assets/characters/template/head.png" id="6_head"]
+[ext_resource type="Texture2D" path="res://assets/characters/template/front_leg.png" id="7_front_leg"]
+[ext_resource type="Texture2D" path="res://assets/characters/template/front_arm.png" id="8_front_arm"]
 [ext_resource type="PackedScene" path="res://scenes/player/mining_component.tscn" id="3_mining"]
 
-[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_1"]
-radius = 12.0
-height = 44.0
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
+size = Vector2(20, 44)
 
 [node name="Player" type="CharacterBody2D"]
 z_index = 9
@@ -15,17 +20,61 @@ collision_mask = 1
 script = ExtResource("1_player")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-shape = SubResource("CapsuleShape2D_1")
+shape = SubResource("RectangleShape2D_1")
 
-[node name="Sprite2D" type="Sprite2D" parent="."]
-texture = ExtResource("2_sprite")
+[node name="SpriteStack" type="Node2D" parent="."]
+
+[node name="BackArm" type="Sprite2D" parent="SpriteStack"]
+z_index = 0
+texture = ExtResource("2_back_arm")
 offset = Vector2(0, -2)
-hframes = 10
-vframes = 10
+hframes = 8
+vframes = 16
+
+[node name="BackLeg" type="Sprite2D" parent="SpriteStack"]
+z_index = 2
+texture = ExtResource("3_back_leg")
+offset = Vector2(0, -2)
+hframes = 8
+vframes = 16
+
+[node name="FrontLeg" type="Sprite2D" parent="SpriteStack"]
+z_index = 4
+texture = ExtResource("7_front_leg")
+offset = Vector2(0, -2)
+hframes = 8
+vframes = 16
+
+[node name="Belt" type="Sprite2D" parent="SpriteStack"]
+z_index = 6
+texture = ExtResource("5_belt")
+offset = Vector2(0, -2)
+hframes = 8
+vframes = 16
+
+[node name="Chest" type="Sprite2D" parent="SpriteStack"]
+z_index = 8
+texture = ExtResource("4_chest")
+offset = Vector2(0, -2)
+hframes = 8
+vframes = 16
+
+[node name="Head" type="Sprite2D" parent="SpriteStack"]
+z_index = 10
+texture = ExtResource("6_head")
+offset = Vector2(0, -2)
+hframes = 8
+vframes = 16
+
+[node name="FrontArm" type="Sprite2D" parent="SpriteStack"]
+z_index = 12
+texture = ExtResource("8_front_arm")
+offset = Vector2(0, -2)
+hframes = 8
+vframes = 16
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position_smoothing_enabled = true
-position_smoothing_speed = 15.0
+position_smoothing_enabled = false
 drag_horizontal_enabled = true
 drag_vertical_enabled = true
 drag_left_margin = 0.3

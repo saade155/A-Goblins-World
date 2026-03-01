@@ -85,6 +85,11 @@ func is_jump_just_released() -> bool:
 	return Input.is_action_just_released("jump")
 
 
+## Returns true while the sprint key is held.
+func is_sprint_pressed() -> bool:
+	return Input.is_action_pressed("sprint")
+
+
 # --- Mining / placement input ---
 
 ## Returns true if the mine action (left mouse) is currently held down.
@@ -122,6 +127,11 @@ func is_debug_fog_toggle_just_pressed() -> bool:
 ## Returns true only on the frame the place torch key was pressed.
 func is_place_torch_just_pressed() -> bool:
 	return Input.is_action_just_pressed("place_torch")
+
+
+## Returns true only on the frame the inventory toggle key was pressed.
+func is_inventory_toggle_just_pressed() -> bool:
+	return Input.is_action_just_pressed("toggle_inventory")
 
 
 # --- Pause input ---

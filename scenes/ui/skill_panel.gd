@@ -10,6 +10,7 @@ var _button_group: ButtonGroup = null
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_ui()
 	_set_visible(false)
 
@@ -19,6 +20,13 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Don't toggle skills while the debug console is open (user is typing).
+	if DebugConsole.console_open:
+		return
+	if _is_open and event.is_action_pressed("pause"):
+		_close()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("toggle_skills"):
 		_toggle()
 		get_viewport().set_input_as_handled()
@@ -33,6 +41,7 @@ func _toggle() -> void:
 
 func _open() -> void:
 	_is_open = true
+	GameServer.skill_panel_open = true
 	_set_visible(true)
 	_populate_skills(_current_category)
 	get_tree().paused = true
@@ -40,6 +49,7 @@ func _open() -> void:
 
 func _close() -> void:
 	_is_open = false
+	GameServer.skill_panel_open = false
 	_set_visible(false)
 	get_tree().paused = false
 	panel_closed.emit()

@@ -72,6 +72,36 @@ func _register_all_items() -> void:
 	# Torch — placeable but not a tile type in TileDatabase (handled specially by ChunkManager)
 	_register("torch", "Torch", ItemType.PLACEABLE, 999, -1, true)
 
+	# --- Equipment (M7 test items) ---
+	_register("iron_helmet", "Iron Helmet", ItemType.EQUIPMENT, 1, -1, false, {
+		"equip_slot": 0,
+		"equip_mode": "overlay",
+		"equip_layers": ["head"],
+		"stats": {"defense": 2.0},
+		"description": "A sturdy iron helmet.",
+	})
+	_register("iron_chestplate", "Iron Chestplate", ItemType.EQUIPMENT, 1, -1, false, {
+		"equip_slot": 1,
+		"stats": {"defense": 4.0},
+		"description": "Basic iron chest armor.",
+	})
+	_register("leather_belt", "Leather Belt", ItemType.EQUIPMENT, 1, -1, false, {
+		"equip_slot": 2,
+		"stats": {"carry_bonus": 5.0},
+		"description": "A simple leather belt.",
+	})
+	_register("iron_gauntlets", "Iron Gauntlets", ItemType.EQUIPMENT, 1, -1, false, {
+		"equip_slot": 3,
+		"stats": {"mining_power": 1.0},
+		"description": "Reinforced iron gauntlets.",
+	})
+	_register("iron_greaves", "Iron Greaves", ItemType.EQUIPMENT, 1, -1, false, {
+		"equip_slot": 4,
+		"stats": {"defense": 3.0},
+		"description": "Protective leg armor.",
+	})
+	# Slot 5 (BACK) — capes, backpacks, quivers, etc. No test item yet.
+
 	# Future items will be registered here:
 	# Tools (M4E)
 	# _register("wood_pickaxe", "Wood Pickaxe", ItemType.TOOL, 1, -1, {"tool_power": 1.0, "mining_speed_bonus": 0.0})
@@ -122,3 +152,50 @@ func has_item(item_id: String) -> bool:
 ## Get all registered item IDs.
 func get_all_ids() -> Array:
 	return _items.keys()
+
+
+## Get the metadata dictionary for an item. Returns empty dict for unknown items.
+func get_item_metadata(item_id: String) -> Dictionary:
+	var item: Dictionary = _items.get(item_id, {})
+	return item.get("metadata", {})
+
+
+## Get the equip slot index for an item. Returns -1 if not equippable.
+func get_equip_slot(item_id: String) -> int:
+	return get_item_metadata(item_id).get("equip_slot", -1)
+
+
+## Get the convention-based icon path for an item: res://assets/items/<item_id>/icon.png
+func get_icon_path(item_id: String) -> String:
+	return "res://assets/items/%s/icon.png" % item_id
+
+
+## Check if an item can be equipped.
+func is_equippable(item_id: String) -> bool:
+	return get_equip_slot(item_id) >= 0
+
+
+## Default body layers affected by each equipment slot.
+const _SLOT_DEFAULT_LAYERS: Dictionary = {
+	0: ["head"],                     # HEAD
+	1: ["chest"],                    # CHEST
+	2: ["belt"],                     # BELT
+	3: ["back_arm", "front_arm"],    # ARMS
+	4: ["back_leg", "front_leg"],    # LEGS
+	5: [],                           # BACK (capes, backpacks — custom layers per item)
+}
+
+
+## Get the equip mode for an item ("overlay" or "replace"). Defaults to "overlay".
+func get_equip_mode(item_id: String) -> String:
+	return get_item_metadata(item_id).get("equip_mode", "overlay")
+
+
+## Get the body layers this equipment affects. Falls back to slot defaults.
+func get_equip_layers(item_id: String) -> Array:
+	var meta := get_item_metadata(item_id)
+	var layers = meta.get("equip_layers", [])
+	if layers.size() > 0:
+		return layers
+	var slot: int = meta.get("equip_slot", -1)
+	return _SLOT_DEFAULT_LAYERS.get(slot, [])

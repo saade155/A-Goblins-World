@@ -48,6 +48,14 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Block mining when inventory or debug console is open.
+	if GameServer.inventory_open or DebugConsole.console_open:
+		if _highlight:
+			_highlight.visible = false
+		if current_target != Vector2i(-1, -1):
+			_reset_mining()
+		return
+
 	# Need world data to check tiles. Wait until it's available.
 	if not GameServer.world_data:
 		return
@@ -106,9 +114,10 @@ func _process(delta: float) -> void:
 					tile_type = GameServer.world_data.get_tile(tile_coord)
 				target_hardness = TileDatabase.get_hardness(tile_type)
 
-			# Accumulate mining progress.
+			# Accumulate mining progress (skill bonus + equipment bonus).
 			var speed_bonus: float = SkillSystem.get_total_perk_effect("mining_speed")
-			mine_progress += delta * base_mine_speed * (1.0 + speed_bonus)
+			var equip_power: float = GameServer.get_equipment_stat_bonus("mining_power")
+			mine_progress += delta * base_mine_speed * (1.0 + speed_bonus + equip_power)
 
 			# Show progress indicator.
 			_progress_indicator.global_position = tile_world_center

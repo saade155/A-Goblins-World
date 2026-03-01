@@ -6,7 +6,7 @@
 |---------|-------|
 | **Palette** | Duel by Arilyn (256 colors, Lospec) — can swap later, engine has no palette dependency |
 | **Tool** | Aseprite (recommended) |
-| **Viewport** | 640×360, integer scale (3× → 1080p, 4× → 1440p) |
+| **Viewport** | 960×540, `canvas_items` stretch, `expand` aspect |
 | **Resolution target** | 1440p primary, graceful downgrade to 1080p. Sharper pixels at higher res, same visible area. |
 | **Style** | Modern retro — intentionally pixel art, not hardware-limited. Think Celeste/Dead Cells polish, not SNES constraints. |
 | **Filtering** | Nearest-neighbor (no anti-aliasing, no sub-pixel) |
@@ -162,7 +162,7 @@ assets/tilesets/
 
 ### Layered Sprite System
 
-The goblin is composed of **7 body layers**, each exported as its own 320×480 sprite sheet (10 columns × 10 rows, 32×48 per frame). All layers share the same animation layout and are frame-synced at runtime.
+The goblin is composed of **7 body layers**, each exported as its own sprite sheet. All layers share the same animation layout and are frame-synced at runtime.
 
 | Layer | Z-Order | Equipment Slot | Notes |
 |-------|---------|---------------|-------|
@@ -184,67 +184,111 @@ The goblin is composed of **7 body layers**, each exported as its own 320×480 s
 
 **Weapons** are a separate sprite (not part of the sheet system). Positioned by code relative to the goblin. Details TBD — start with simple items and see how they look.
 
-### Animation Layout (Per Sheet)
+### Sprite Sheet Format (Locked)
 
-Every layer sheet — base or equipment — uses this identical row layout:
+- One PNG per body layer, per character/equipment piece
+- All animations and orientations baked into a single sheet
+- Fixed **8 columns** (longest animation padded with blank frames)
+- Fixed **16 rows** (reserved layout below — rows never move, columns never change)
+- New animations fill reserved slots; if all 16 used, overflow goes to a second "extended animations" sheet
+- Frame size: 32x48 pixels per cell (may change if 2x art pipeline is adopted — see foundation-redesign.md)
+- Sheet dimensions: **256x768** (8 columns x 16 rows x 32x48 per cell)
 
-| Row | Animation | Frames | Loop? | Description |
-|-----|-----------|--------|-------|-------------|
-| 0 | **Walk** | 6 | Yes | Walking cycle |
-| 1 | **Run** | 8 | Yes | Full run cycle. Arms and legs pumping. Head can bob 1px. |
-| 2 | **Jump** (8) + **Fall** (2) | 10 | No | Jump frames then fall frames at col offset 8 |
-| 3 | **Idle** | 1 | — | Default standing pose |
-| 4 | **Idle Ear** | 1 | — | Ear twitch variant |
-| 5 | **Idle Blink** | 1 | — | Blink variant |
-| 6 | **Idle Fidget** | 1 | — | Fidget variant |
-| 7 | **Mine/Swing** | 6-8 | No | Pickaxe swing: wind-up → swing → impact. *Not yet created.* |
-| 8 | **Hurt** | 3 | No | Knockback/flinch. *Not yet created.* |
-| 9 | **Land** | 2-3 | No | Squash on landing. *Not yet created.* |
+### Row Assignments (Locked)
 
-Rows 7-9 are reserved — frame counts are approximate until animated.
+| Row | Tag | Frames | Orientation | Purpose |
+|-----|-----|--------|-------------|---------|
+| 0 | `idle` | 4 | side | Default idle |
+| 1 | `idle_2` | 4 | side | Variant idle |
+| 2 | `idle_3` | 4 | side | Variant idle |
+| 3 | `idle_4` | 4 | side | Variant idle |
+| 4 | `walk` | 6 | side | Standard walk |
+| 5 | `run` | 6 | side | Sprint |
+| 6 | `jump` | 4 | side | Launch + airborne |
+| 7 | `fall` | 4 | side | Descent |
+| 8 | `land` | 4 | side | Landing impact + recover |
+| 9 | *reserved* | -- | side | Future side-facing |
+| 10 | *reserved* | -- | side | Future side-facing |
+| 11 | *reserved* | -- | side | Future side-facing |
+| 12 | `walk_back` | 6 | back | Walking into passage/doorway |
+| 13 | `climb_back` | 6 | back | Climbing into background |
+| 14 | `walk_front` | 6 | front | Walking toward camera |
+| 15 | *reserved* | -- | front/back | Future orientation variant |
+
+### Row Assignment Rules
+
+- Side-facing animations use `flip_h` for left/right — no mirrored art needed
+- Back and front orientations are separate art, separate rows
+- Shorter animations pad remaining columns with blank (transparent) frames
+- Frame counts are defined in code (not auto-detected from blank frames)
+- Equipment sheets use the EXACT same row/column layout — drop-in texture replacement per layer
+- Row assignments are permanent. Adding new animations fills reserved rows. Nothing shifts.
+- If 16 rows are exhausted, create a second sheet (extended animations) with its own row table
+
+### Animation Data Dictionary (Code Reference)
+
+The engine reads animations from this dictionary. Row numbers match the sprite sheet layout above.
+
+```gdscript
+const ANIMATIONS = {
+    "idle":       { "row": 0, "frames": 4 },
+    "idle_2":     { "row": 1, "frames": 4 },
+    "idle_3":     { "row": 2, "frames": 4 },
+    "idle_4":     { "row": 3, "frames": 4 },
+    "walk":       { "row": 4, "frames": 6 },
+    "run":        { "row": 5, "frames": 6 },
+    "jump":       { "row": 6, "frames": 4 },
+    "fall":       { "row": 7, "frames": 4 },
+    "land":       { "row": 8, "frames": 4 },
+    "walk_back":  { "row": 12, "frames": 6 },
+    "climb_back": { "row": 13, "frames": 6 },
+    "walk_front": { "row": 14, "frames": 6 },
+}
+```
 
 ### Aseprite Workflow
 
 1. Animate the full goblin in one `.aseprite` file with all 7 body layers
-2. Each animation = one row in the timeline/tag system
-3. Export each layer individually as a 320×480 PNG:
-   - Hide all layers except the target layer
-   - Export as sprite sheet (10 columns × 10 rows)
-   - Transparent everywhere except that layer's pixels
-4. Equipment pieces follow the same process — animate in a layered file, export the relevant layer(s)
+2. Create animation tags matching the row order in the locked row assignments above
+3. Export per-layer: target one layer, all tags, fixed 8 columns — PNG wraps into rows
+4. Pad shorter animations to 8 frames with blank (transparent) cells
+5. Result: one 256x768 PNG per layer with all animations baked in
+6. Equipment pieces follow the same process — animate in a layered file, export the relevant layer(s)
 
 ### Player File Structure
 
-**Base goblin (7 sheets):**
+**Base goblin (7 sheets, 256x768 each — 8 columns x 16 rows x 32x48 per cell):**
 ```
-assets/sprites/player/base/
-├── goblin_back_arm.png          ← 320×480 (10×10 grid)
-├── goblin_back_leg.png
-├── goblin_chest.png
-├── goblin_belt.png
-├── goblin_head.png
-├── goblin_front_leg.png
-├── goblin_front_arm.png
+assets/characters/goblin/
+  base/
+    back_arm.png      # Z0 - all animations, all orientations
+    back_leg.png      # Z1
+    chest.png         # Z2
+    belt.png          # Z3
+    head.png          # Z4
+    front_leg.png     # Z5
+    front_arm.png     # Z6
 ```
 
-**Equipment (per item, only layers it affects):**
+**Equipment (per item, only layers it affects — same 8x16 layout):**
 ```
-assets/sprites/equipment/
-├── iron_helmet/
-│   └── head.png                 ← 320×480, replaces head layer
-├── leather_chest/
-│   └── chest.png                ← replaces chest layer
-├── iron_greaves/
-│   ├── front_leg.png            ← replaces both leg layers
-│   └── back_leg.png
-├── goblin_robe/
-│   ├── chest.png                ← replaces chest + belt + legs
-│   ├── belt.png
-│   ├── front_leg.png
-│   └── back_leg.png
-├── leather_gloves/
-│   ├── front_arm.png            ← replaces both arm layers
-│   └── back_arm.png
+assets/characters/goblin/
+  equipment/
+    iron_helmet/
+      head.png        # Same 8x16 layout, replaces base head layer
+    leather_vest/
+      chest.png       # Same layout, replaces base chest layer
+    iron_greaves/
+      front_leg.png   # Replaces both leg layers
+      back_leg.png
+    goblin_robe/
+      chest.png       # Replaces chest + belt + legs
+      belt.png
+      front_leg.png
+      back_leg.png
+    leather_gloves/
+      front_arm.png   # Replaces both arm layers
+      back_arm.png
 ```
 
 **Weapons (separate sprites, not sheet-based):**
@@ -339,12 +383,14 @@ General direction when we get there:
 
 ## Aseprite Workflow Summary
 
-1. **New file** → set canvas size (32×48 for goblin, 32×32 for tiles/items)
+1. **New file** → set canvas size (32x48 for goblin, 32x32 for tiles/items)
 2. **Load palette** → Palette → Load Palette → select Duel (by Arilyn)
 3. **Set indexed mode** → Sprite → Color Mode → Indexed (locks to palette)
 4. **Draw/animate** → timeline at bottom, one frame per column
 5. **Onion skin** → toggle onion icon to see previous/next frames while drawing
-6. **Export** → File → Export Sprite Sheet → Horizontal Strip, PNG
+6. **Tag animations** → create tags matching the locked row assignments (idle, idle_2, walk, run, etc.)
+7. **Pad frames** → ensure every tag has exactly 8 frames (pad shorter ones with blank transparent frames)
+8. **Export per-layer** → File → Export Sprite Sheet → fixed 8 columns, all tags, one layer visible → PNG
 
 ## What to Build NOW vs LATER
 

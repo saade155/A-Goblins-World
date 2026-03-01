@@ -1,9 +1,9 @@
 # This Goblin's World - Implementation Plan
 
-**Engine:** Godot 4.4+ (GDScript)
+**Engine:** Godot 4.5.1 (GDScript)
 **Solo dev + AI assisted**
 
-Structured as milestones that each produce something playable. Early milestones (1-6) are detailed with Godot specifics. Mid milestones (7-10) have moderate detail. Later milestones (11-18) are broader because the right decisions depend on what we learn building the foundation.
+Structured as milestones that each produce something playable. M1-M6 plus Phase 1/1.5 are complete. Early milestones (M7-M12) are detailed with Godot specifics. Mid milestones (M13-M16) have moderate detail. Later milestones (M17-M24) are broader because the right decisions depend on what we learn building the foundation.
 
 ---
 
@@ -19,11 +19,7 @@ Every game action flows through an authority. In single-player, the local game I
 - Rendering reads from authoritative state, never writes to it
 
 **Chunk Architecture:**
-The world is effectively infinite. From day one:
-- World data is stored in chunks (dictionaries of tile data, not TileMapLayer nodes)
-- Only chunks near the player get rendered via TileMapLayer
-- Chunks load/unload as the player moves
-- World generation happens per-chunk on demand
+The world is finite and bounded, with selectable size presets (Small 2400x800, Medium 3600x1000, Large 4800x1200). Tile data is stored in chunks (dictionaries of tile data, not TileMapLayer nodes). Only chunks near the player get rendered. All chunk data lives in memory for the finite world, so chunk loading is synchronous (no threading needed). World generation happens once at world creation.
 
 **Data vs. Presentation:**
 World state (what tile is at position X,Y) is data in dictionaries. TileMapLayer nodes are presentation. This separation is what makes multiplayer, saving, and chunk streaming possible.
@@ -32,7 +28,7 @@ World state (what tile is at position X,Y) is data in dictionaries. TileMapLayer
 The game watches what the player does from the very first session. This system is not a milestone feature - it is infrastructure that goes in early and feeds everything later:
 - Every meaningful player action is recorded: blocks mined (type, depth), enemies killed (type, weapon used), items crafted (type, station), damage taken (type, source), spells cast, distances traveled, resources gathered, tools used, stations built
 - Tracked as cumulative counters and rolling windows (recent behavior matters for class offers, lifetime totals matter for thresholds)
-- This data feeds: skill XP calculations (Milestone 5), class unlock evaluation (Milestone 10), dynamic difficulty awareness, and analytics
+- This data feeds: skill XP calculations (M5), class unlock evaluation (M16), dynamic difficulty awareness, and analytics
 - The tracking system is a `BehaviorTracker` autoload that listens to signals from `GameServer` - it never modifies game state, only observes
 - Storage is lightweight: dictionaries of counters, serialized with save data
 - Even before skills or classes exist in-game, every action is being counted. When those systems come online, they read from a rich history of player behavior
@@ -40,6 +36,7 @@ The game watches what the player does from the very first session. This system i
 ---
 
 ## Milestone 1: Project Setup and Core Movement
+**Status:** COMPLETE
 
 **Goal:** A goblin moving and jumping in a small hardcoded room. Establish the project structure, input system, and movement feel.
 
@@ -113,6 +110,7 @@ Goblin moves fluidly with visible acceleration. Jumping feels snappy. Variable j
 ---
 
 ## Milestone 2: Tilemap and Basic Mining
+**Status:** COMPLETE
 
 **Goal:** The player can destroy and place tiles. World is still small/hardcoded, but the tile interaction pipeline is real. BehaviorTracker starts recording mining actions.
 
@@ -169,8 +167,9 @@ Player can mine a tunnel, blocks drop items, items get picked up, blocks can be 
 ---
 
 ## Milestone 3: Chunk System and World Generation
+**Status:** COMPLETE
 
-**Goal:** Procedurally generated, effectively infinite world. Chunks load/unload as the player moves. Game starts underground. BehaviorTracker records depth reached.
+**Goal:** Procedurally generated world. Chunks load/unload as the player moves. Game starts underground. BehaviorTracker records depth reached.
 
 ### What Gets Built
 
@@ -178,7 +177,7 @@ Player can mine a tunnel, blocks drop items, items get picked up, blocks can be 
 - Tracks player position, determines active chunk radius (5x5 around player)
 - Loads entering chunks, unloads leaving chunks
 - One TileMapLayer per active chunk, positioned at world offset
-- Chunk size: 32x32 tiles (512x512 pixels)
+- Chunk size: 32x32 tiles (512x512 pixels at original 16px tile size)
 - Background thread generation, main thread application via `call_deferred`
 
 **World generator:**
@@ -245,234 +244,63 @@ World generates seamlessly in any direction. No pop-in, no frame drops. Modified
 
 ---
 
-## Milestone 4: Inventory, Crafting, and Menus (IN PROGRESS — 4B NEXT)
+## Milestone 4: Inventory, Menus, Animation, Tiles, and Save System
+**Status:** COMPLETE (all sub-phases)
 
-**Goal:** Full inventory system with station-based crafting, quality foundation, and complete menu infrastructure (title screen, pause menu, settings, save slots).
+**Goal:** Item database, inventory data layer, full menu infrastructure, player animation, tile edge system, and enhanced saves. Originally scoped as a single milestone, broken into sub-phases during development.
 
 ### Sub-phases
 
-#### 4A: Item Database + Inventory Data Layer
+#### 4A: Item Database + Inventory Data Layer — COMPLETE
 - **Item database (autoload):** Static registry loaded from data files. Items have: id, name, icon, max_stack, type (material/tool/weapon/placeable/consumable), metadata. Tools add: tool_quality (enum: Crude/Standard/Fine/Masterwork/Legendary/Ancient), mining_power, crafting_bonus
 - **Inventory system:** Fixed slots (30 + 10 hotbar), item stacking, split/swap. State lives on GameServer, UI reads from it
 
-#### 4B: Menus + Save Slots
+#### 4B: Menus + Save Slots — COMPLETE
 - **Title screen:** New Game / Load Game / Settings / Quit
 - **Pause menu (Escape):** Resume / Settings / Save & Quit / Quit to Title
-- **Settings menu:** Audio (master/sfx/music volume), Video (fullscreen, resolution), Controls (keybinding display, remapping deferred to later)
-- **Save slot system:** Multiple worlds instead of hardcoded `user://worlds/default/`. SaveManager parameterized by world slot. World metadata: name, playtime, last played date, thumbnail (stretch)
-- **Load screen:** Show existing saves with metadata, delete save option
+- **Settings menu:** Audio (master/sfx/music volume), Video (fullscreen, resolution), Controls (keybinding display, remapping)
+- **Save slot system:** Multiple worlds instead of hardcoded `user://worlds/default/`. SaveManager parameterized by world slot. World metadata: name, playtime, last played date
 
-#### 4C: Game HUD + Inventory UI
-- **HUD:** Hotbar with selected slot highlight, health bar
-- **Inventory grid:** Drag/drop, split/swap, right-click actions
-- **Crafting panel:** Available recipes filtered by nearby station
-- **Tooltip system:** Item name, quality, stats, description
+#### 4.5: Player Animation & Sprite Integration — COMPLETE
+- Replaced placeholder sprite with authored goblin sprite sheet
+- Wired all core gameplay animations via AnimationPlayer (idle, walk, run, jump, fall)
+- Direct frame control animation system
+- Sprite sheet conventions: 32x48px frames, flip_h for direction
 
-#### 4D: Crafting System + Stations + Recipes
-- **Hand-crafting:** Limited to survival basics — torches, crude bandages, campfires, rope, crude stone tools. Available anywhere, no station needed. Always produces Crude quality
-- **Station-based crafting:** Stations are interactive world scenes — walk up, press interact, filtered recipe UI opens. Always produces Standard quality
-- **Stations gate recipe categories:**
-  - Workbench: basic items, furniture, building components
-  - Furnace: smelting ores into bars
-  - Anvil: weapons, armor, tools
-- **Station progression chain:** Workbench → Furnace (needs workbench to build) → Anvil (needs smelted iron from furnace)
-- **Recipe database** with station requirements. Authority validates ingredients before crafting
+#### 4.6: Tile Edge & Overlay System — COMPLETE (then STRIPPED in Phase 1)
+- Edge and ore overlay rendering as additional TileMapLayers per chunk
+- Base + overlay approach replacing bitmask system
+- **Note:** This entire system was stripped during the Phase 1 world generation rebuild. The 16px tile migration and colored-rectangle rendering approach replaced it. The infrastructure work here informed the layer architecture but the art pipeline was abandoned in favor of biome color palettes.
 
-#### 4E: Tool Progression + Quality + BehaviorTracker
-- **Tool progression:** Wood → Stone → Iron → Gold pickaxes. Each tier mines faster and mines harder blocks
-- **Quality foundation:** Enum: Crude/Standard/Fine/Masterwork/Legendary/Ancient. Quality field on every item from day one. Quality affects displayed stats (multipliers per tier defined in data). Weighted roll system deferred to M9
-- **Initial recipes:**
-  - Hand-craft: torches, campfire, crude stone pickaxe, crude bandage
-  - Workbench: wooden tools, furniture, furnace components
-  - Furnace: ore → bars (copper, iron, gold)
-  - Anvil: metal tools, weapons, armor
-- **BehaviorTracker additions:** items_crafted (by type and station), stations_built (by type), stations_used (by type), items_consumed
+#### 4.7: Enhanced Save System — COMPLETE
+- Refactored save structure to support multiple snapshots per world
+- Autosave (timer-based + event-triggered)
+- Save browser UI for loading past save points
+- "Saving..." overlay with minimum display time
+- SaveManager as RefCounted (not Node) — uses polling pattern instead of call_deferred
+- Directory structure: `user://worlds/<slot_name>/` with `world.dat`, `behavior.dat`, `current/`, `saves/`
+- Save version 5, rejects < v5
 
 ### Key Technical Decisions
 - Item database as data files — easy to add items without code changes
 - Inventory on authority side — UI sends requests, reacts to confirmed changes
-- Quality field on every item from day one — data structure ready for M9
-- Hand-crafting = Crude, station-crafting = Standard — immediately communicates that stations matter
+- Quality field on every item from day one — data structure ready for crafting quality system
 - Menus use CanvasLayer with Control nodes — independent of game world rendering
 - Save slots parameterize SaveManager — minimal refactor of existing persistence
 
 ### Acceptance Tests
 1. **Inventory:** Pick up items, stack, split, swap, drop. Edge cases (full inventory, max stack) handled
-2. **Crafting loop:** Mine → hand-craft crude stone pickaxe → build workbench → craft furnace → smelt iron → build anvil → craft iron pickaxe. Crude pickaxe visibly worse than anvil-crafted
-3. **Menus:** Title screen → New Game starts fresh world. Escape pauses. Settings persist. Save & Quit → Load Game restores state
-4. **Save slots:** Create multiple worlds, load each independently, delete a save
-5. **BehaviorTracker:** `get_count("items_crafted")` is accurate
-
----
-
-## Milestone 4.5 — Player Animation & Sprite Integration
-**Status:** NEXT
-**Depends on:** M1 (player scene exists)
-
-### Goals
-- Replace placeholder sprite with authored goblin sprite sheet
-- Wire up all core gameplay animations via AnimationPlayer
-- Implement eye blink overlay system for character expressiveness
-- Establish sprite sheet conventions for future art (mobs, NPCs)
-
-### Sprite Sheet Conventions
-- **Frame size:** 32×48px
-- **Sheet size:** 320×480 (10 columns × 10 rows)
-- **Layout:** One row per animation, max 10 frames per animation
-- **Direction:** Left-facing art, flip_h in code for right
-- **Body centered** in all frames (no root motion offset)
-- **Separate sheets** for cosmetic/situational animations (emotes, dances)
-
-### Tasks
-1. **Sprite sheet integration**
-   - Import `assets/sprites/player/goblin_spritesheet.png`
-   - Configure Sprite2D with hframes=10, vframes=10
-   - Set up import settings (pixel art filtering, no mipmaps)
-
-2. **AnimationPlayer setup**
-   - Idle animation (row 0)
-   - Walk animation (row 1, 8 frames)
-   - Run animation (row 2, 8 frames)
-   - Jump + Fall animation (row 3, 10 frames)
-   - Future rows reserved: attack, mine, hurt, etc.
-
-3. **Eye blink overlay**
-   - Separate small sprite for eye region (~8×4px)
-   - BlinkTimer with random 3-6 second interval
-   - Blink sequence: open → half → closed → half → open (~0.15s)
-   - Y-offset arrays per animation to track head bob
-
-4. **Animation state machine**
-   - Wire movement states to animation playback in player.gd
-   - Handle transitions (idle↔walk, jump→fall, land→idle)
-   - Flip sprite based on movement direction
-
-5. **In-game tuning pass**
-   - Animation speeds per state
-   - Transition timing
-   - Visual feel at game resolution (960×540 → 1920×1080)
-
-### Future Note
-> Mob and NPC sprites will follow the same sheet conventions (32×48 frames, 320×480 sheets, row-per-animation). Their art integration will be scoped alongside M6 (Combat) and M7 (Enemy AI) respectively.
-
----
-
-## Milestone 4.6 — Tile Edge & Ore Overlay System
-**Status:** PENDING
-**Depends on:** M3 (chunk/tile system exists)
-
-### Goals
-- Implement edge and ore overlay rendering as two additional TileMapLayers per chunk
-- Replace current 20-variant bitmask with clean base + overlay approach
-- Add ore protrusion sprites that extend beyond tile boundaries for visual depth
-- Establish tile art pipeline: 14 edge pieces per tile type + 12 protrusion pieces per ore type
-- Build infrastructure reusable by background walls (M8)
-
-### Layer Breakdown
-```
-Torches          (Z=-1)  — torch sprites
-Base layer       (Z=0)   — interior tile fills, collision
-Edge overlay     (Z=1)   — tile edges/corners (renders behind player)
-Player           (Z=2)   — player z_index set to 2
-Ore overlay      (Z=3)   — ore protrusions into neighbor tiles (renders in front of player)
-Darkness         (Z=5)   — darkness/lighting overlay
-```
-
-### Tile Art Convention
-- **Base layer (Z=0):** Interior/center texture only (1 piece per tile type)
-- **Edge layer (Z=1):** Transparent edge sprites on a second TileMapLayer
-- **Ore layer (Z=3):** Ore protrusion sprites on a third TileMapLayer
-- **Per tile type (edges):** 14 art pieces — 1 interior fill, 4 cardinal edges, 4 outer corners, 4 inner corners
-- **Per ore type (protrusions):** 4-12 art pieces — 4 cardinal protrusions (minimum), + 4 outer corners + 4 inner corners (full set)
-
-### Tasks
-1. **Two additional TileMapLayers per chunk**
-   - Add edge overlay TileMapLayer (Z=1) to chunk scene
-   - Add ore overlay TileMapLayer (Z=3) to chunk scene
-   - Chunk manager creates/manages all three layers
-   - Set player z_index to 2
-
-2. **Edge detection & bitmask**
-   - Neighbor sampling for edge determination
-   - Handle chunk boundaries (cross-chunk neighbor lookups)
-   - Determine which edge/corner pieces to place per tile
-
-3. **Edge tile atlas**
-   - Import edge sprite sheets (14 pieces per tile type)
-   - Configure TileSet atlas for edge tiles
-   - Map edge bitmask results to atlas coordinates
-
-4. **Ore protrusion system**
-   - Vein-edge detection: protrusions only on ore tiles adjacent to non-ore neighbors
-   - Place protrusion sprites on neighboring tile cells (extending 4-8px from ore boundary)
-   - Same neighbor-detection logic as edges, applied to ore types
-
-5. **Ore protrusion atlas**
-   - Import ore protrusion sprite sheets per ore type
-   - Configure TileSet atlas for ore overlay tiles
-   - Map vein-edge bitmask results to atlas coordinates
-
-6. **Migrate existing tiles**
-   - Convert stone tiles to base + edge overlay
-   - Convert dirt tiles to base + edge overlay
-   - Remove old 20-variant bitmask system from tile_data.gd
-
-7. **Depth/lighting integration**
-   - Edge pieces support directional shading (floor faces lit, ceiling shadows)
-   - Prepare hooks for future ambient occlusion / depth effects
-
-8. **Cross-tile-type edges**
-   - Handle transitions between different tile types (dirt meeting stone)
-   - Priority system for which tile type's edge renders on top
-
-### Art Deliverables (Christian)
-> **Edge sprites** — while coding proceeds, create edge sprite sheets for:
-> - Stone (14 pieces)
-> - Dirt (14 pieces)
-> - Additional tile types as needed
->
-> **Ore protrusion sprites** — per ore type:
-> - Iron ore protrusions (4 cardinal minimum, 12 full set)
-> - Gold ore protrusions
-> - Crystal ore protrusions
-> - Additional ore types as needed
->
-> Protrusions extend 4-8px beyond tile boundary. Each piece is 32x32 with transparency.
-
-### Future Note
-> This TileMapLayer infrastructure will be reused by M8 (Building & Defenses) for background walls. M8 adds wall tile content and room enclosure logic on top of what M4.6 builds.
-
----
-
-## Milestone 4.7 — Enhanced Save System
-**Status:** PENDING
-**Depends on:** M4B (menus + basic save slots)
-
-### Goals
-- Refactor save structure to support multiple snapshots per world
-- Add autosave (timer-based + event-triggered)
-- Add manual save with player-chosen names
-- Save browser UI for loading past save points
-- "Saving..." overlay with minimum display time
-
-### Tasks
-1. Migrate directory structure (current/ + saves/ layout)
-2. SaveManager refactor for snapshot operations (create, copy, load, delete)
-3. Autosave timer + event trigger system
-4. Manual save UI (name input dialog from pause menu)
-5. Save browser UI (list saves within a world, load/delete)
-6. "Saving..." overlay with minimum 2-second display
-7. Backward compatibility migration for existing saves
-8. Load Game menu update (world → save point two-level selection)
-
-### Design Reference
-See `docs/plans/save-system.md` for full design details.
+2. **Menus:** Title screen -> New Game starts fresh world. Escape pauses. Settings persist. Save & Quit -> Load Game restores state
+3. **Save slots:** Create multiple worlds, load each independently, delete a save
+4. **Animation:** Player sprite animates correctly for all movement states
+5. **Saves:** Multiple snapshots per world, autosave works, save browser loads correct state
 
 ---
 
 ## Milestone 5: Skill System and Behavior Tracking
+**Status:** COMPLETE (commit `96b31b7`)
 
-**Goal:** Learn-by-doing skill system goes live. Skills level through use, soft-capped by environment difficulty. The BehaviorTracker data accumulated since Milestone 2 feeds into XP calculations. Material efficiency starts working.
+**Goal:** Learn-by-doing skill system goes live. Skills level through use, soft-capped by environment difficulty. The BehaviorTracker data accumulated since M2 feeds into XP calculations.
 
 ### What Gets Built
 
@@ -483,8 +311,8 @@ See `docs/plans/save-system.md` for full design details.
   - **Smithing** - leveled by crafting at anvil/forge
   - **Construction** - leveled by placing blocks and building
   - **Survival** - leveled by crafting consumables, healing, cooking
-  - **Melee** - stub, leveled by combat (Milestone 6 activates it)
-  - **Defense** - stub, leveled by taking/blocking damage (Milestone 6 activates it)
+  - **Melee** - stub, leveled by combat (M12 activates it)
+  - **Defense** - stub, leveled by taking/blocking damage (M12 activates it)
 - Each skill has a level curve (exponential XP requirements)
 
 **XP from appropriate challenge (the soft cap):**
@@ -496,12 +324,11 @@ See `docs/plans/save-system.md` for full design details.
   - difficulty matching skill: 1.0x (sweet spot)
   - difficulty above skill: 1.5x (pushing your limits, rewarded)
   - difficulty far above skill: 1.5x cap (can't cheese it by attempting impossible tasks)
-- This means: mining basic stone at Mining 50 gives almost nothing. Mining iron at Mining 50 gives good XP. Mining crystal at Mining 50 gives great XP.
-- Ore/tile difficulty values defined in tile_data. Enemy difficulty defined in enemy_data (for Milestone 6).
+- Ore/tile difficulty values defined in tile_data. Enemy difficulty defined in enemy_data (for M12).
 
 **Skill effects (immediate, scaling):**
 - **Mining:** speed bonus (% faster per level), chance for bonus ore drop, reduced tool durability loss
-- **Smithing:** (prepares for Milestone 9) for now just tracks XP, no quality influence yet
+- **Smithing:** tracks XP, no quality influence yet (prepares for M15)
 - **Construction:** faster block placement, sturdier structures (HP bonus)
 - **Survival:** more effective consumables, better healing
 - Skills provide gradual passive improvement - nothing is gated behind "need level X"
@@ -524,8 +351,7 @@ See `docs/plans/save-system.md` for full design details.
 - `BehaviorTracker` now feeds `SkillSystem` via signals
 - When `tile_mined` fires, `SkillSystem` calculates Mining XP based on tile difficulty vs current Mining level
 - When `item_crafted` fires at a station, `SkillSystem` calculates Smithing/relevant skill XP
-- Historical data from BehaviorTracker doesn't retroactively grant XP (skills start at 0 when this milestone goes live in dev, but in the shipped game, skills exist from the start)
-- BehaviorTracker continues accumulating all counters - class system (Milestone 10) will read lifetime totals
+- BehaviorTracker continues accumulating all counters - class system (M16) will read lifetime totals
 
 **Skill UI:**
 - Simple skill panel accessible from inventory screen
@@ -533,7 +359,7 @@ See `docs/plans/save-system.md` for full design details.
 - No skill point allocation - this is purely informational ("here's what you've become")
 
 **Save/load:**
-- Skill data serialized with save file
+- Skill data serialized per character (player-owned, travels between worlds)
 - BehaviorTracker data serialized with save file
 
 ### What the Player Can Do
@@ -543,7 +369,7 @@ Mine and watch Mining skill level up. Notice mining gets faster as skill increas
 - **Skills as pure data** - no nodes, no scenes, just dictionaries. Fast to query, easy to serialize
 - **Challenge-based XP** - the core design principle. Environment difficulty IS the progression gate
 - **BehaviorTracker stays separate from SkillSystem** - BehaviorTracker records everything (for classes later), SkillSystem only cares about XP-relevant actions
-- **No retroactive XP** - skills level from actions taken after the system exists. In shipped game this is seamless since skills exist from Milestone 1's save data
+- **No retroactive XP** - skills level from actions taken after the system exists
 - **Material efficiency as a multiplier on recipe cost** - simple math, big impact on feel
 - **Perks as data entries, not code** - easy to add new perks without touching skill system code
 
@@ -552,9 +378,287 @@ Mining stone gives Mining XP. Mining dirt at Mining level 20+ gives almost no XP
 
 ---
 
-## Milestone 6: Combat Foundation
+## Phase 1: World Generation Rebuild
+**Status:** COMPLETE (commit `da7fe02`)
 
-**Goal:** Melee combat with dodging, hitbox/hurtbox system, one test enemy. Combat skills start leveling through use via the skill system.
+**Goal:** Rebuild the world system from the ground up — 16px tiles, finite bounded worlds, back walls, fog of war, and a new spawn chamber. This was a major architecture change that replaced the old infinite chunk streaming with finite worlds that fit entirely in memory.
+
+### What Gets Built
+
+- **16px tiles** (rebuilt from 32px): All tile rendering and collision updated. Chunk size remains 32x32 tiles but each tile is now 16x16 pixels
+- **Finite bounded worlds** with selectable size presets:
+  - Small: 2400x800 tiles
+  - Medium: 3600x1000 tiles
+  - Large: 4800x1200 tiles
+  - World size chosen at new game creation
+- **Back wall system:** Separate tile layer (Z=-10) with darker modulate. Back walls are mineable independently of front tiles
+- **BFS fog of war:** Flood-fill exploration through empty space. Surface daylight expansion reveals tiles near the surface. Fog persists via SaveManager. World-owned (any player reveals for all)
+- **Spawn chamber:** 24x14 tiles at world center. Guaranteed safe starting area
+- **Colored rectangle rendering:** Biome color palettes drive tile appearance instead of sprite-based tiles. The M4.6 edge/overlay system was stripped entirely
+- **Synchronous chunk loading:** Since all tile data lives in memory for finite worlds, chunk loading is synchronous — no threading overhead needed
+
+### Key Technical Decisions
+- **Finite over infinite** — bounded worlds enable full-world operations (fog of war, lighting) without streaming complexity
+- **All data in memory** — eliminates chunk save/load during gameplay; world_cache.dat handles persistence
+- **16px tiles** — doubles visual detail density at same viewport size, better for the art style
+- **Fog of war as world-owned** — globally shared exploration state, not per-player
+- **Strip edge/overlay system** — colored rectangles are fast and sufficient until proper tile art is ready
+
+### Acceptance Test
+World generates correctly at all three size presets. Back walls render behind front tiles. Fog of war reveals correctly via BFS flood-fill. Spawn chamber generates reliably. Performance is solid with all tile data in memory.
+
+---
+
+## Phase 1.5: BFS Light System
+**Status:** COMPLETE (commit `8851c2d`)
+
+**Goal:** Discrete lighting system using BFS flood-fill. Sunlight, torches, and player-driven recomputation. World cache for full tile persistence.
+
+### What Gets Built
+
+- **Discrete light levels 0-40:** MAX_LIGHT=40, SUN_LIGHT=40, TORCH_LIGHT=28, AIR_REDUCTION=2, SOLID_REDUCTION=8, PLAYER_SOLID_REDUCTION=14
+- **Sunlight propagation:** Propagates downward through air WITHOUT reduction (stays 40). Horizontal and through-wall propagation reduces normally
+- **Two light maps:**
+  - `static_light_map` — sun + torches, computed once at init
+  - `player_light_map` — recomputed on tile change (mining, placing, torches)
+- **Localized recompute:** `_recompute_light_local(center)` — 45x45 area (~2000 tiles), seeds from sun/torches/boundary. Used for all gameplay light changes
+- **Full recompute:** `_recompute_static_light()` — entire world, init only
+- **World cache:** Full tile data saved to `world_cache.dat`, loaded directly on save load (no regeneration needed)
+- **Darkness overlay:** 34x34 images with `region_rect(1,1,32,32)` for seamless chunk boundaries. NOT position offset — region_rect approach is correct
+- **Physics cap:** `Engine.max_physics_steps_per_frame = 4` prevents snap-to-floor during light recompute
+
+### Key Technical Decisions
+- **BFS over shader-based lighting** — discrete levels are simple, predictable, and cheap to compute locally
+- **Two separate light maps** — static map avoids full recompute on every player action
+- **Localized recompute** — ~2000 tiles is fast enough for real-time gameplay; full recompute only at world load
+- **34x34 images with region_rect** — solves chunk boundary seam artifacts without position hacks
+
+### Acceptance Test
+Sunlight illuminates surface correctly. Torches cast light with falloff. Mining into a dark area triggers localized light recompute instantly. No visible seams at chunk boundaries. World cache loads correctly, skipping regeneration.
+
+---
+
+## Milestone 6: HUD & Display System
+**Status:** COMPLETE (commit `0920aa5`)
+
+**Goal:** Gameplay HUD with hotbar, vitals, minimap, and status effects. Display settings supporting multiple window modes and resolutions. GameServer player stat signals.
+
+### What Gets Built
+
+- **HUD components** (all under `gameplay_hud.gd` CanvasLayer):
+  - `hotbar_display.gd` — 10 slots, centered bottom, `focus_mode = FOCUS_NONE` (Tab freed for inventory)
+  - `vitals_display.gd` — health/mana/stamina bars, bottom-left anchored
+  - `minimap_display.gd` — top-right anchored
+  - `status_effects_display.gd` — top-left anchored
+- **Dynamic viewport positioning:** All HUD components have `reposition()` methods, triggered by viewport `size_changed` signal
+- **Display settings:**
+  - Stretch mode: `canvas_items` (crisp text at native resolution, pixel art stays retro)
+  - Stretch aspect: `expand` (ultrawide monitors see more world, no black bars)
+  - Window modes: Windowed / Borderless Windowed / Fullscreen (default: Borderless)
+  - Mode transitions: Always reset to WINDOWED first, then apply target mode (Windows quirk)
+  - Resolution picker: Only visible in Windowed mode, built dynamically from monitor size
+- **GameServer player stat signals:** `health_changed`, `mana_changed`, `stamina_changed` with stat setters and clamping
+- **InputManager:** Hotbar scroll via mouse wheel in `_unhandled_input`
+
+### Key Technical Decisions
+- **canvas_items + expand** — best combo for pixel art game that needs crisp UI text and ultrawide support
+- **Borderless fullscreen as default** — seamless alt-tabbing on Windows
+- **Reset to WINDOWED before mode change** — Windows quirk requires this for reliable transitions
+- **FOCUS_NONE on hotbar slots** — prevents Godot's `ui_focus_next` (Tab) from cycling through hotbar
+
+### Acceptance Test
+HUD displays correctly at all supported resolutions and window modes. Hotbar selection works via number keys and mouse wheel. Vitals bars update in real-time from GameServer signals. Window mode changes work reliably including borderless fullscreen. Resolution picker only appears in windowed mode.
+
+---
+
+## Milestone 7: Inventory UI & Equipment System
+
+**Goal:** Visual inventory grid with full interaction and an equipment system that affects player stats. Builds on M4A's inventory data layer to add the UI and equipment mechanics.
+
+### What Gets Built
+
+- **Inventory grid UI:** 30-slot main inventory + 10-slot hotbar, opened with Tab
+  - Drag/drop items between slots
+  - Split stacks (right-click drag or shift-click)
+  - Swap items between slots
+  - Right-click context menu (equip, drop, use)
+  - Stack merging on drop
+- **Equipment slots:** 6 slots — head, chest, legs, feet, weapon, offhand/shield
+  - Equipment panel alongside inventory grid
+  - Drag from inventory to equip, drag off to unequip
+  - Slot type validation (can't put helmet in chest slot)
+- **Tooltip system:** Hover over any item to see:
+  - Item name (color-coded by quality)
+  - Item type and quality tier
+  - Stat bonuses (damage, defense, mining power, etc.)
+  - Description text
+- **Equipment stat effects:**
+  - Equipped items modify player stats via GameServer
+  - Stats recalculated on equip/unequip
+  - Defense from armor, damage from weapons, tool bonuses from held items
+- **Persistence:** Equipment state saved/loaded alongside inventory data
+
+### Key Technical Decisions
+- **UI sends requests to GameServer** — inventory operations are validated server-side before visual update
+- **Equipment stats as additive modifiers** — base stats + sum of equipment bonuses, easy to recalculate
+- **Tooltip as a single reusable Control node** — positioned at mouse, content rebuilt on hover change
+- **Tab toggles inventory** — consistent with M6's FOCUS_NONE approach, no focus conflicts
+
+### Acceptance Test
+Player can open inventory, drag items between slots, split and merge stacks. Equipment slots accept only valid item types. Equipping armor visibly changes defense stat. Tooltips display correct information for all item types. All inventory and equipment state persists through save/load.
+
+---
+
+## Milestone 8: Containers
+
+**Goal:** Storage chests that players can craft, place in the world, and use to store items. Container contents persist with world save data.
+
+### What Gets Built
+
+- **Storage chest:** Craftable from wood/stone, placeable as a world object
+  - Interaction: walk up and press interact key to open
+  - Container has its own inventory grid (size varies by chest tier)
+- **Container UI:** Opens alongside player inventory
+  - Shift-click to quick-transfer items between inventories
+  - Drag/drop between container and player inventory
+  - Close on walk-away or press interact/escape
+- **Item transfer validation:** GameServer validates all transfers (no duplication exploits)
+- **Container persistence:**
+  - Container contents stored in world save data (world-owned, not player-owned)
+  - Containers tied to world position — survive chunk unload/reload
+  - Container metadata in world_data alongside tile data
+- **Multiple container types (stretch):** Small chest, large chest, locked chest
+
+### Key Technical Decisions
+- **Containers as world-owned data** — stored alongside tile data in world_cache.dat, not in player save
+- **Same inventory slot system as player** — reuse M7's grid UI with different backing data
+- **Interaction range check** — GameServer validates player proximity before allowing container access
+- **Container ID system** — each container gets a unique ID tied to its world position
+
+### Acceptance Test
+Player can craft a chest, place it, open it, transfer items in and out. Container contents persist after closing. Contents survive save/load cycle. Multiple chests work independently. Walking away closes the UI. No item duplication possible.
+
+---
+
+## Milestone 9: Water System
+
+**Goal:** Liquid simulation that adds environmental variety and traversal challenges. Water flows, fills cavities, and affects player movement.
+
+### What Gets Built
+
+- **Liquid simulation:**
+  - Water as a separate data layer (like back walls) with fill levels per tile
+  - Flow mechanics: water spreads horizontally and falls with gravity
+  - Source blocks that generate water (underground springs, surface lakes)
+  - Cellular automaton update — processed per chunk on a tick timer, not per frame
+- **Water rendering:**
+  - Semi-transparent blue overlay on tiles containing water
+  - Fill level affects visual height within a tile
+  - Surface animation (subtle wave effect)
+  - Water tint gets darker at depth
+- **Player interaction:**
+  - Swimming movement (reduced speed, different controls)
+  - Breath meter — limited underwater time before taking damage
+  - Water slows falling (no fall damage into deep water)
+  - Mining underwater is slower
+- **World generation integration:**
+  - Underground water pockets generated during world creation
+  - Surface water bodies (lakes, rivers) in appropriate biomes
+  - Water can flood player-mined tunnels if they breach a water pocket
+
+### Key Technical Decisions
+- **Fill levels per tile (0-8)** — allows partial fills and realistic flow, not just binary wet/dry
+- **Tick-based simulation** — water updates on a timer (e.g., 10 ticks/sec), not every physics frame
+- **Separate data layer** — water data stored alongside tile data in world_cache.dat
+- **Chunk-boundary flow** — water simulation checks neighboring chunks for cross-boundary flow
+
+### Acceptance Test
+Water flows downward and spreads horizontally realistically. Breaking into a water pocket floods the tunnel. Player can swim with reduced speed. Breath meter depletes underwater. Water persists through save/load. No performance issues with large water bodies.
+
+---
+
+## Milestone 10: Map Transitions & Doorways
+
+**Goal:** Allow the player to move between separate map instances — enabling dungeons, portal realms, and instanced areas that exist outside the main world.
+
+### What Gets Built
+
+- **Transition system:**
+  - Door/portal objects placeable in the world
+  - Interaction triggers map transition (fade to black, load target, fade in)
+  - Bidirectional — player can return to previous map
+- **Map instances:**
+  - Each map is a separate world_data with its own tile data, lighting, fog
+  - Maps loaded/unloaded independently (only one active at a time for now)
+  - Map definitions: size, generation rules, entry/exit points
+- **Portal/door types:**
+  - Doors: connect two points within the same world or between worlds
+  - Portals: crafted or discovered, link to special realms (foundation for The Abyss and other realms)
+  - Dungeon entrances: generated in the world, lead to hand-designed or procedural sub-maps
+- **Player state preservation:**
+  - Inventory, equipment, skills, health/mana/stamina carry across transitions
+  - Player position saved per-map (return to where you left)
+  - Characters travel between worlds (Terraria model)
+- **Save integration:**
+  - Each map instance saved independently under the world's save directory
+  - Transition metadata (which map links to which) stored in world save
+
+### Key Technical Decisions
+- **One active map at a time** — simplifies memory and rendering; multiplayer can revisit this later
+- **Maps as independent world_data instances** — reuses all existing chunk/tile/light infrastructure
+- **Transition as scene swap** — current world scene freed, new one instantiated, player transferred
+- **Map registry** — central registry of map IDs, types, and entry points stored in world save
+
+### Acceptance Test
+Player can enter a door/portal and arrive in a separate map instance. Returning brings them back to the correct position. Player stats and inventory persist across transitions. Both maps save independently. Dungeon entrances generate in the world and lead to functional sub-maps.
+
+---
+
+## Milestone 11: Items & Base Crafting
+
+**Goal:** Expanded item roster and a crafting system with hand-crafting and station-based crafting. The foundation for all future crafting content.
+
+### What Gets Built
+
+- **Expanded item roster:**
+  - Full set of ores, bars, and materials for current biomes
+  - Consumables: bandages, food items, potions (basic)
+  - Placeable items: furniture, lighting, decoration
+  - Tools: pickaxes, axes, hammers per material tier
+- **Hand-crafting system:**
+  - Available anywhere, no station needed
+  - Limited to survival basics: torches, crude bandages, campfires, rope, crude stone tools
+  - Always produces Crude quality
+  - Recipe list accessible from inventory UI
+- **Station-based crafting:**
+  - Stations are interactive world objects — walk up, press interact, filtered recipe UI opens
+  - Always produces Standard quality (quality variation deferred to M15)
+  - Station types: Workbench (basic items, furniture), Furnace (smelting ores to bars), Anvil (weapons, armor, tools)
+  - Station progression chain: Workbench -> Furnace (needs workbench) -> Anvil (needs smelted iron)
+- **Recipe database:**
+  - Data-driven recipe definitions (ingredients, station requirement, output, difficulty)
+  - Authority validates ingredients before crafting
+  - Recipe discovery: all recipes visible but locked ones show requirements
+- **Crafting UI:**
+  - Recipe list filtered by available station and known recipes
+  - Material requirements shown with have/need counts
+  - Craft button with progress bar for multi-step recipes
+- **BehaviorTracker additions:** items_crafted (by type and station), stations_built, stations_used
+
+### Key Technical Decisions
+- **Recipes as data files** — easy to add content without code changes
+- **Hand-craft = Crude, station = Standard** — immediately communicates that stations matter
+- **Station progression chain** — natural tutorial flow, each station unlocks the next
+- **Recipe database autoload** — centralized, queryable, feeds both UI and validation
+
+### Acceptance Test
+Player can hand-craft torches and basic tools anywhere. Building a workbench unlocks new recipes. Furnace smelts ore into bars. Anvil crafts metal tools and weapons. Recipe UI shows correct material requirements. Crafted items appear in inventory. All crafting data persists through save/load.
+
+---
+
+## Milestone 12: Combat Foundation
+
+**Goal:** Melee combat with dodging, hitbox/hurtbox system, one test enemy. Combat skills start leveling through use via the skill system from M5.
 
 ### What Gets Built
 
@@ -568,7 +672,7 @@ Mining stone gives Mining XP. Mining dirt at Mining level 20+ gives almost no XP
 - Attack arc/hitbox activated during attack animation frames
 - Weapon stats: damage, speed, knockback, reach
 - Two weapons minimum: sword (fast, narrow arc) and hammer (slow, wide arc, bonus to armored)
-- Weapons have quality field (all Standard for now, quality variation in Milestone 9)
+- Weapons have quality field (all Standard for now, quality variation in M15)
 
 **Dodge roll:**
 - Quick dash with i-frames, cooldown-based
@@ -609,7 +713,7 @@ Mining stone gives Mining XP. Mining dirt at Mining level 20+ gives almost no XP
 - `dodges_performed`
 - `deaths`
 - `healing_used` (by item type)
-- These counters are critical: they directly feed class unlock evaluation in Milestone 10. A player who fights with swords accumulates sword kills. A player who takes tons of damage accumulates damage-taken counters. The class system reads all of this.
+- These counters are critical: they directly feed class unlock evaluation in M16. A player who fights with swords accumulates sword kills. A player who takes tons of damage accumulates damage-taken counters. The class system reads all of this.
 
 ### What the Player Can Do
 Equip sword or hammer, attack cave bats, dodge through swoops, kill for loot, die and respawn. Watch Melee and Defense skills level up through combat. Notice that fighting tougher enemies gives more combat XP. Combat feels snappy and skill-based.
@@ -620,7 +724,7 @@ Equip sword or hammer, attack cave bats, dodge through swoops, kill for loot, di
 - **State machine** for player and enemies (simple script pattern, no framework)
 - **Damage through GameServer** - `deal_damage(source, target, amount, type)` -> signals -> BehaviorTracker + SkillSystem both listen
 - **Stamina system** introduced here - shared resource for dodge and later heavy attacks
-- **Enemy difficulty_level** as data - directly plugs into skill XP formula from Milestone 5
+- **Enemy difficulty_level** as data - directly plugs into skill XP formula from M5
 - **Every combat action tracked** - this is non-negotiable. Class unlocks depend on rich combat history
 
 ### Acceptance Test
@@ -628,7 +732,7 @@ Player can equip weapons, attack the cave bat, dodge its swoop, kill it for loot
 
 ---
 
-## Milestone 7: Enemy AI and Encounters
+## Milestone 13: Enemy AI and Encounters
 
 **Goal:** Multiple enemy types populating the cave system with natural spawning. Depth-based difficulty scaling. Combat becomes a real part of the exploration loop.
 
@@ -641,7 +745,7 @@ Player can equip weapons, attack the cave bat, dodge its swoop, kill it for loot
 - Enemies despawn when their chunk unloads
 
 **3-5 enemy types, each with unique behavior:**
-- **Cave Bat** (from M6, refined): Flies, swoops, low HP, fast - shallow caves
+- **Cave Bat** (from M12, refined): Flies, swoops, low HP, fast - shallow caves
 - **Slime:** Hops toward player, splits into smaller slimes on death - shallow/mid caves
 - **Skeleton Miner:** Walks patrol routes, swings pickaxe, can block - mid caves
 - **Cave Spider:** Climbs walls and ceilings, shoots webs (slow effect), ambush predator - mid/deep caves
@@ -681,18 +785,17 @@ Caves feel alive with enemies. Each type behaves distinctly. Depth scaling is no
 
 ---
 
-## Milestone 8: Building and Defenses
+## Milestone 14: Building and Defenses
 
-**Goal:** Proper base building with background walls, furniture, functional defenses. Opt-in escalation system. Construction skill matters.
+**Goal:** Proper base building with furniture, functional defenses. Opt-in escalation system. Construction skill matters.
 
-> **Note:** The background wall TileMapLayer infrastructure (second TileMapLayer per chunk, edge overlay system, cross-chunk rendering) is built in M4.6. This milestone adds wall tile content, room enclosure detection, and wall gameplay — not the rendering layer itself.
+> **Note:** The back wall system was built in Phase 1. This milestone adds wall tile content variety, room enclosure detection, and wall-dependent gameplay.
 
 ### What Gets Built
 
-**Background wall layer:**
-- Second TileMapLayer per chunk for background walls
-- Walls define "enclosed rooms" (required for some furniture/station functionality)
+**Background wall variety:**
 - Wall types with visual variety (stone, wood, crystal)
+- Walls define "enclosed rooms" (required for some furniture/station functionality)
 
 **Furniture and stations as scenes:**
 - Expanded station list: workbench, furnace, anvil, storage chest, door, bed (respawn point)
@@ -713,7 +816,7 @@ Caves feel alive with enemies. Each type behaves distinctly. Depth scaling is no
 - Events triggered by player progression actions (mining rare ores, killing sub-bosses)
 - Telegraphed: "The ground trembles..." -> 60-second warning -> enemy wave
 - Waves target nearest player structure with defenses
-- Minor threats only for now (scaled up in Milestone 11)
+- Minor threats only for now (scaled up in M17)
 - Player who doesn't trigger progression events stays safe
 
 **Outpost markers:**
@@ -724,7 +827,6 @@ Caves feel alive with enemies. Each type behaves distinctly. Depth scaling is no
 Build a proper base with rooms, storage, and crafting stations. Set up defenses that matter. Trigger escalation events through progression and defend against them. Establish outposts as forward bases. See Construction skill improve building speed and defense quality.
 
 ### Key Technical Decisions
-- **Background walls as separate TileMapLayer** - clean separation, independent rendering
 - **Enclosed room detection** - flood fill algorithm checking for complete wall/door enclosure
 - **Defenses as StaticBody2D scenes** with HP, not just tiles
 - **Escalation events as data-driven triggers** - action thresholds defined in data files
@@ -734,7 +836,7 @@ Player can build enclosed rooms. Furniture works inside rooms. Defenses take and
 
 ---
 
-## Milestone 9: Crafting Quality and Tool Progression
+## Milestone 15: Crafting Quality and Tool Progression
 
 **Goal:** Full quality tier system goes live. Station quality, tool quality, material difficulty, and skill level all influence crafting outcomes. The full ore tier chain. This is where the crafting endgame takes shape.
 
@@ -766,7 +868,7 @@ Player can build enclosed rooms. Furniture works inside rooms. Defenses take and
 - Matching armor and weapon tiers
 
 **Material efficiency (enhanced):**
-- Skill-based efficiency from Milestone 5 now interacts with quality attempts
+- Skill-based efficiency from M5 now interacts with quality attempts
 - Attempting higher quality uses same materials but failing wastes more
 - High skill = less waste on failed quality attempts
 
@@ -789,9 +891,9 @@ Crafting produces variable quality results. Higher skill level visibly shifts qu
 
 ---
 
-## Milestone 10: Class System
+## Milestone 16: Class System
 
-**Goal:** Behavior-unlocked and knowledge-unlocked classes. Two class slots. Class skill pool with slotting and progression. The BehaviorTracker data accumulated since Milestone 2 finally pays off in a big way.
+**Goal:** Behavior-unlocked and knowledge-unlocked classes. Two class slots. Class skill pool with slotting and progression. The BehaviorTracker data accumulated since M2 finally pays off in a big way.
 
 ### What Gets Built
 
@@ -852,7 +954,7 @@ Player who mines heavily gets offered a mining class. Player who fights with swo
 
 ---
 
-## Milestone 11: Progression and Bosses
+## Milestone 17: Progression and Bosses
 
 **Goal:** Boss encounters gating major progression. Ability unlocks. World evolution. Relics as boss drops and exploration rewards. Escalation events scale up.
 
@@ -865,14 +967,14 @@ Player who mines heavily gets offered a mining class. Player who fights with swo
 - **Relics:** Permanent perk items found as boss drops, in hidden rooms, and in ancient ruins. Each grants a specific enhancement. Some bear chicken motifs. Relics stack on top of class skills - independent progression layer.
 - **World evolution:** Boss kills change the world (new enemy types appear, new ore veins generate, "the depths are angry" events)
 - **Escalation scaling:** Boss kills trigger larger defense events, telegraphed well in advance
-- **NPC training preview:** One or two hidden master NPCs who teach specific techniques (combat move, crafting secret) in exchange for resources or tasks. This previews the full NPC system in Milestone 13.
+- **NPC training preview:** One or two hidden master NPCs who teach specific techniques (combat move, crafting secret) in exchange for resources or tasks. This previews the full NPC system in M19.
 
 ### What the Player Can Do
 Seek out bosses, learn their patterns, defeat them. Gain new traversal abilities. Find relics that permanently enhance the character. See the world respond to their victories. Defend against escalated threats. The full character identity stack starts coming together: skills + classes + class skills + relics.
 
 ---
 
-## Milestone 12: Surface World and Biomes
+## Milestone 18: Surface World and Biomes
 
 **Goal:** Player breaks through to the surface. Overworld biomes exist. The game's scope expands dramatically.
 
@@ -887,7 +989,7 @@ Seek out bosses, learn their patterns, defeat them. Gain new traversal abilities
 
 ---
 
-## Milestone 13: NPCs, Trade, and Training
+## Milestone 19: NPCs, Trade, and Training
 
 **Goal:** Discoverable NPCs and civilizations. Trade system. NPC training as a perk source. Knowledge-unlocked classes from NPC interactions.
 
@@ -906,7 +1008,7 @@ Discover that they're not alone. Trade excess resources for unique items. Seek o
 
 ---
 
-## Milestone 14: Automation
+## Milestone 20: Automation
 
 **Goal:** Optional automation systems tied to Engineering skill.
 
@@ -919,7 +1021,7 @@ Discover that they're not alone. Trade excess resources for unique items. Seek o
 
 ---
 
-## Milestone 15: Additional Realms
+## Milestone 21: Additional Realms
 
 **Goal:** Portal system to new dimensions with unique rules.
 
@@ -933,7 +1035,7 @@ Discover that they're not alone. Trade excess resources for unique items. Seek o
 
 ---
 
-## Milestone 16: Narrative and Chicken Conspiracy
+## Milestone 22: Narrative and Chicken Conspiracy
 
 **Goal:** Environmental storytelling woven throughout the world. Endgame revelation.
 
@@ -947,7 +1049,7 @@ Discover that they're not alone. Trade excess resources for unique items. Seek o
 
 ---
 
-## Milestone 17: Multiplayer
+## Milestone 23: Multiplayer
 
 **Goal:** Drop-in/drop-out co-op using the architecture built from day one.
 
@@ -963,7 +1065,7 @@ This is why we built client-server from day one. GameServer becomes the network 
 
 ---
 
-## Milestone 18: Polish and Steam
+## Milestone 24: Polish and Steam
 
 **Goal:** Ship-ready game.
 
@@ -983,8 +1085,8 @@ This is why we built client-server from day one. GameServer becomes the network 
 
 | Risk | Mitigation |
 |------|------------|
-| Chunk border seams | Overlap by 1 tile or shader fix |
-| Performance with many chunks | Strict unloading, object pooling, LOD |
+| Chunk border seams | Overlap by 1 tile, 34x34 darkness images with region_rect |
+| Performance with many chunks | Finite world with all data in memory, synchronous loading |
 | Boring world generation | Multiple noise layers, structures, POIs, constant playtesting |
 | Floaty combat | Nail movement in M1 first. Frame-precise hitboxes. Playtest constantly. |
 | Multiplayer retrofit pain | Client-server architecture from M1 prevents this |
@@ -993,10 +1095,10 @@ This is why we built client-server from day one. GameServer becomes the network 
 | Quality system feels like gambling | Weight the roll heavily toward skill/station factors. RNG adds excitement, not frustration. Bad luck protection (pity counter) if needed. |
 | Behavior tracking performance | Lightweight counters only. No per-frame tracking. Signal-based, batched writes. Profile early. |
 | Station bootstrap loop feels stuck | Ensure each tier is achievable with previous tier's best. Tune material difficulty so the jump is challenging, not impossible. |
-| Scope creep | Each milestone is playable. Cut from the end (M14-M16 most cuttable). Core identity is M1-M10. |
+| Scope creep | Each milestone is playable. Cut from the end (M20-M22 most cuttable). Core identity is M1-M16. |
 
 ---
 
 ## Start Here
 
-**Milestone 1.** Create the Godot project, set up folder structure, get a CharacterBody2D on screen with good jump physics. Wire up the GameServer stub, InputManager, and BehaviorTracker skeleton. Everything depends on movement feeling right - and on the tracking infrastructure being in place from the start, even if it does nothing visible yet.
+**Milestones 1-6 plus Phase 1/1.5 are complete.** Next up is M7 (Inventory UI & Equipment System), building on the inventory data layer from M4A.

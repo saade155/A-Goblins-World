@@ -29,6 +29,11 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Don't toggle pause while any overlay is open — they handle Escape themselves.
+	if DebugConsole.console_open:
+		return
+	if GameServer.inventory_open or GameServer.skill_panel_open or GameServer.map_open:
+		return
 	if event.is_action_pressed("pause"):
 		if _is_open:
 			_resume()
@@ -108,6 +113,7 @@ func _quit_to_desktop() -> void:
 func _go_to_title() -> void:
 	get_tree().paused = false
 	GameState.is_game_active = false
+	GameState.reset_for_new_game()
 	GameServer.reset_state()
 	get_tree().change_scene_to_file("res://scenes/menus/title_screen.tscn")
 
@@ -383,6 +389,8 @@ func _on_load_snapshot(save_name: String) -> void:
 	sm.world_name = GameState.world_slot_name
 	sm.load_snapshot(save_name)
 	get_tree().paused = false
+	GameState.saved_player_position = null
+	GameServer.reset_state()
 	get_tree().reload_current_scene()
 
 

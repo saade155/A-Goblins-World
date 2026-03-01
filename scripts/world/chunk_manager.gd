@@ -139,9 +139,6 @@ var _look_ahead_chunk: Vector2i = Vector2i(999999, 999999)
 ## Tracks player tile for fog-of-war darkness updates.
 var _last_fog_player_tile: Vector2i = Vector2i(999999, 999999)
 
-## Tracks player pixel position for sub-tile fog darkness updates.
-var _last_fog_pos: Vector2 = Vector2(-99999, -99999)
-
 ## Whether the current world gen is a save load (for loading overlay text).
 var _is_loading_save: bool = false
 
@@ -201,7 +198,10 @@ func _ready() -> void:
 		# Load session state (position, inventory, playtime) from current/state.dat
 		var state = save_manager.load_state()
 		if state:
-			GameState.saved_player_position = Vector2(state.get("player_position_x", 0.0), state.get("player_position_y", 0.0))
+			var pos_x: float = state.get("player_position_x", 0.0)
+			var pos_y: float = state.get("player_position_y", 0.0)
+			if pos_x != 0.0 or pos_y != 0.0:
+				GameState.saved_player_position = Vector2(pos_x, pos_y)
 			GameState.playtime_seconds = state.get("playtime_seconds", 0.0)
 
 		print("[ChunkManager] Loaded world save. Seed: %d, world_size: %d" % [GameState.world_seed, GameState.world_size])
@@ -277,7 +277,7 @@ func _ready() -> void:
 	# For finite worlds, try loading the world cache first (skips regeneration).
 	# If no cache exists (new world or first load), generate from seed and cache.
 	if ws >= 0:
-		if not _is_existing_save:
+		if not _is_existing_save and world_data.world_width > 0:
 			@warning_ignore("integer_division")
 			var center_x: int = world_data.world_width / 2
 			GameState.saved_player_position = Vector2(center_x * TILE_SIZE, GameState.start_depth * TILE_SIZE)
@@ -445,11 +445,6 @@ func _process(_delta: float) -> void:
 		_last_fog_player_tile = player_tile
 		# Recompute player dynamic light when tile changes
 		_update_player_light(player_tile)
-
-	# Update fog darkness whenever player moves more than 2 pixels (sub-tile smoothing)
-	var cur_fog_pos: Vector2 = GameState.player.global_position
-	if cur_fog_pos.distance_squared_to(_last_fog_pos) > 4.0:
-		_last_fog_pos = cur_fog_pos
 		_update_fog_darkness()
 
 	# Poll for background save completion
@@ -740,6 +735,7 @@ func _on_tile_mined(world_pos: Vector2i, tile_type: int, _tool_used: String) -> 
 	_update_fog_darkness()
 	# Localized light recompute (fast — only ~2000 tiles around mined tile)
 	_recompute_light_local(world_pos)
+	_update_player_light(_last_fog_player_tile)
 
 
 ## Called when a tile is placed via GameServer. Update the visual tilemap.
@@ -755,6 +751,7 @@ func _on_tile_placed(world_pos: Vector2i, tile_type: int) -> void:
 	_update_neighbor_visuals(world_pos)
 
 	_recompute_light_local(world_pos)
+	_update_player_light(_last_fog_player_tile)
 
 
 ## Called when a back wall is mined via GameServer. Update visuals and spawn a drop.
@@ -769,6 +766,8 @@ func _on_back_wall_mined(world_pos: Vector2i, tile_type: int) -> void:
 	_spawn_dropped_item(world_pos, tile_type)
 
 	_update_fog_darkness()
+	_recompute_light_local(world_pos)
+	_update_player_light(_last_fog_player_tile)
 
 
 ## Called when a back wall is placed via GameServer. Update visuals.
@@ -779,6 +778,8 @@ func _on_back_wall_placed(world_pos: Vector2i, tile_type: int) -> void:
 		var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
 		var visual: Dictionary = _get_tile_visual(world_pos, tile_type)
 		back_wall_tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
+
+	_update_player_light(_last_fog_player_tile)
 
 
 ## Spawn a dropped item at the world position of a mined tile.
@@ -1206,10 +1207,17 @@ func save_all() -> void:
 		save_manager.save_world_cache(world_data)
 
 	# Save session state (player position, inventory, playtime)
-	var player_pos := Vector2.ZERO
+	var player_pos = null
 	if GameState.player:
 		player_pos = GameState.player.global_position
-	save_manager.save_state(player_pos, GameState.get_total_playtime())
+	elif GameState.saved_player_position != null:
+		player_pos = GameState.saved_player_position
+
+	# Only save state if we have a valid position — don't overwrite a good save with zero
+	if player_pos == null:
+		print("[ChunkManager] save_all: No valid player position — skipping state save.")
+	else:
+		save_manager.save_state(player_pos, GameState.get_total_playtime())
 
 	# Save behavior tracker data
 	save_manager.save_behavior_data(BehaviorTracker)
@@ -1239,8 +1247,7 @@ func _on_autosave_timeout() -> void:
 	var save_name: String = "auto_%s" % Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
 
 	# Get player position
-	var player: Node = get_tree().get_first_node_in_group("player")
-	var player_pos: Vector2 = player.global_position if player else Vector2.ZERO
+	var player_pos: Vector2 = GameState.player.global_position if GameState.player else Vector2.ZERO
 
 	# Launch threaded snapshot
 	save_manager.create_snapshot(save_name, "autosave", player_pos, GameState.get_total_playtime())
@@ -1256,8 +1263,7 @@ func create_save(save_name: String, reason: String = "manual") -> void:
 	_save_dirty_chunks()
 	save_manager.save_behavior_data(BehaviorTracker)
 	save_manager.save_skill_data(SkillSystem)
-	var player: Node = get_tree().get_first_node_in_group("player")
-	var player_pos: Vector2 = player.global_position if player else Vector2.ZERO
+	var player_pos: Vector2 = GameState.player.global_position if GameState.player else Vector2.ZERO
 	save_manager.create_snapshot(save_name, reason, player_pos, GameState.get_total_playtime())
 	_saving_overlay.show_saving()
 
@@ -1271,8 +1277,7 @@ func request_autosave(reason: String) -> void:
 	save_manager.save_skill_data(SkillSystem)
 	save_manager.rotate_autosaves(MAX_AUTOSAVES)
 	var save_name: String = "auto_%s" % Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
-	var player: Node = get_tree().get_first_node_in_group("player")
-	var player_pos: Vector2 = player.global_position if player else Vector2.ZERO
+	var player_pos: Vector2 = GameState.player.global_position if GameState.player else Vector2.ZERO
 	save_manager.create_snapshot(save_name, reason, player_pos, GameState.get_total_playtime())
 	_saving_overlay.show_saving()
 
@@ -1335,12 +1340,14 @@ func _remove_torch(world_pos: Vector2i) -> void:
 func _on_torch_placed(world_pos: Vector2i) -> void:
 	_spawn_torch(world_pos)
 	_recompute_light_local(world_pos)
+	_update_player_light(_last_fog_player_tile)
 
 
 ## Called when GameServer confirms a torch was removed.
 func _on_torch_removed(world_pos: Vector2i) -> void:
 	_remove_torch(world_pos)
 	_recompute_light_local(world_pos)
+	_update_player_light(_last_fog_player_tile)
 
 
 # --- Utility ---

@@ -11,7 +11,7 @@
 ##
 ## Storage is lightweight: dictionaries of counters, serialized with save data.
 ## Actions are recorded as cumulative counters and a rolling window of recent
-## actions (recent behavior matters for class offers, lifetime totals matter
+## actions (recent behavior matters for dw class offers, lifetime totals matter
 ## for unlock thresholds).
 
 extends Node

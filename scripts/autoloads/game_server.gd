@@ -53,6 +53,15 @@ signal hotbar_selection_changed(slot: int)
 ## Emitted when items could not be picked up (inventory full).
 signal inventory_full(item_id: String, amount: int)
 
+## Emitted when an equipment slot changes.
+signal equipment_changed(slot: int)
+
+## Emitted when the inventory open/closed state changes.
+signal inventory_open_changed(is_open: bool)
+
+## Emitted when the cursor-held item changes.
+signal cursor_item_changed()
+
 ## Emitted when player health changes.
 signal player_health_changed(current: float, max_val: float)
 
@@ -76,6 +85,21 @@ var inventory_main: Array[Dictionary] = []
 
 ## Hotbar inventory storage (10 slots).
 var inventory_hotbar: Array[Dictionary] = []
+
+## Equipment inventory storage (6 slots).
+var inventory_equipment: Array[Dictionary] = []
+
+## Whether the inventory UI is currently open.
+var inventory_open: bool = false
+
+## Whether the skill panel is currently open.
+var skill_panel_open: bool = false
+
+## Whether the map overlay is currently open.
+var map_open: bool = false
+
+## Item currently held on the cursor (drag-and-drop).
+var cursor_item: Dictionary = {"item_id": "", "amount": 0, "quality": 0}
 
 ## Currently selected hotbar index (0-9).
 var selected_hotbar_slot: int = 0
@@ -104,6 +128,15 @@ const TILE_SIZE: int = 16
 const MAIN_SLOTS: int = 30
 const HOTBAR_SLOTS: int = 10
 
+## Equipment slot counts and indices.
+const EQUIP_SLOTS: int = 6
+const EQUIP_HEAD: int = 0
+const EQUIP_CHEST: int = 1
+const EQUIP_BELT: int = 2
+const EQUIP_ARMS: int = 3
+const EQUIP_LEGS: int = 4
+const EQUIP_BACK: int = 5
+
 
 func _ready() -> void:
 	print("[GameServer] Initialized -- acting as local authority.")
@@ -120,6 +153,10 @@ func reset_state() -> void:
 	player_mana = 50.0
 	player_max_stamina = 100.0
 	player_stamina = 100.0
+	cursor_item = _empty_slot()
+	inventory_open = false
+	skill_panel_open = false
+	map_open = false
 	_initialize_inventory()
 	print("[GameServer] State reset.")
 
@@ -309,7 +346,7 @@ func _empty_slot() -> Dictionary:
 	return {"item_id": "", "amount": 0, "quality": 0}
 
 
-## Initialize both inventory arrays with empty slots. Called from _ready().
+## Initialize all inventory arrays with empty slots. Called from _ready().
 func _initialize_inventory() -> void:
 	inventory_main.clear()
 	inventory_hotbar.clear()
@@ -318,16 +355,46 @@ func _initialize_inventory() -> void:
 	for i in range(HOTBAR_SLOTS):
 		inventory_hotbar.append(_empty_slot())
 	selected_hotbar_slot = 0
+	_initialize_equipment()
+
+
+## Initialize equipment array with empty slots.
+func _initialize_equipment() -> void:
+	inventory_equipment.clear()
+	for i in range(EQUIP_SLOTS):
+		inventory_equipment.append(_empty_slot())
+
+
+## Return the inventory array for a given area name.
+func _get_inv_array(area: String) -> Array[Dictionary]:
+	if area == "hotbar":
+		return inventory_hotbar
+	elif area == "equipment":
+		return inventory_equipment
+	else:
+		return inventory_main
+
+
+## Return the max slot count for a given area name.
+func _get_inv_max(area: String) -> int:
+	if area == "hotbar":
+		return HOTBAR_SLOTS
+	elif area == "equipment":
+		return EQUIP_SLOTS
+	else:
+		return MAIN_SLOTS
 
 
 # --- Inventory: Query Methods ---
 
-## Get a slot dictionary by area ("main" or "hotbar") and index.
+## Get a slot dictionary by area ("main", "hotbar", or "equipment") and index.
 func get_slot(area: String, index: int) -> Dictionary:
 	if area == "hotbar" and index >= 0 and index < HOTBAR_SLOTS:
 		return inventory_hotbar[index]
 	elif area == "main" and index >= 0 and index < MAIN_SLOTS:
 		return inventory_main[index]
+	elif area == "equipment" and index >= 0 and index < EQUIP_SLOTS:
+		return inventory_equipment[index]
 	return _empty_slot()
 
 
@@ -342,6 +409,13 @@ func get_hotbar_slot(index: int) -> Dictionary:
 func get_main_slot(index: int) -> Dictionary:
 	if index >= 0 and index < MAIN_SLOTS:
 		return inventory_main[index]
+	return _empty_slot()
+
+
+## Shorthand: get an equipment slot.
+func get_equipment_slot(index: int) -> Dictionary:
+	if index >= 0 and index < EQUIP_SLOTS:
+		return inventory_equipment[index]
 	return _empty_slot()
 
 
@@ -583,6 +657,285 @@ func request_split_stack(area: String, slot_index: int, split_amount: int, targe
 func request_select_hotbar(slot: int) -> void:
 	selected_hotbar_slot = clampi(slot, 0, HOTBAR_SLOTS - 1)
 	hotbar_selection_changed.emit(selected_hotbar_slot)
+
+
+## Set whether the inventory UI is open. Returns cursor item when closing.
+func set_inventory_open(open: bool) -> void:
+	inventory_open = open
+	if not open:
+		_return_cursor_item()
+	inventory_open_changed.emit(open)
+
+
+## Pick up items from a slot into the cursor.
+## area: "main", "hotbar", or "equipment". amount=-1 means full stack.
+## If cursor is empty: pick up. If cursor has same item+quality: merge into cursor.
+## Returns false if nothing can be picked up.
+func request_pickup_from_slot(area: String, index: int, amount: int = -1) -> bool:
+	var arr: Array[Dictionary] = _get_inv_array(area)
+	var arr_max: int = _get_inv_max(area)
+	if index < 0 or index >= arr_max:
+		return false
+
+	var slot: Dictionary = arr[index]
+	if slot["item_id"] == "":
+		return false
+
+	var pickup_amount: int = slot["amount"] if amount == -1 else mini(amount, slot["amount"])
+	if pickup_amount <= 0:
+		return false
+
+	# Cursor is empty: pick up directly
+	if cursor_item["item_id"] == "":
+		cursor_item["item_id"] = slot["item_id"]
+		cursor_item["quality"] = slot["quality"]
+		cursor_item["amount"] = pickup_amount
+		slot["amount"] -= pickup_amount
+		if slot["amount"] <= 0:
+			arr[index] = _empty_slot()
+		if area == "equipment":
+			equipment_changed.emit(index)
+		cursor_item_changed.emit()
+		inventory_changed.emit()
+		return true
+
+	# Cursor has same item+quality: merge into cursor
+	if cursor_item["item_id"] == slot["item_id"] and cursor_item["quality"] == slot["quality"]:
+		var cursor_max: int = ItemDatabase.get_max_stack(cursor_item["item_id"])
+		var cursor_space: int = cursor_max - cursor_item["amount"]
+		if cursor_space <= 0:
+			return false
+		var to_move: int = mini(pickup_amount, cursor_space)
+		cursor_item["amount"] += to_move
+		slot["amount"] -= to_move
+		if slot["amount"] <= 0:
+			arr[index] = _empty_slot()
+		if area == "equipment":
+			equipment_changed.emit(index)
+		cursor_item_changed.emit()
+		inventory_changed.emit()
+		return true
+
+	return false
+
+
+## Place items from cursor into a slot.
+## area: "main", "hotbar", or "equipment". amount=-1 means full stack.
+## Empty slot: place. Same item: merge. Different item: swap (full stack only).
+## For equipment: validates equip_slot via ItemDatabase.get_equip_slot().
+## Returns false if placement is invalid.
+func request_place_to_slot(area: String, index: int, amount: int = -1) -> bool:
+	var arr: Array[Dictionary] = _get_inv_array(area)
+	var arr_max: int = _get_inv_max(area)
+	if index < 0 or index >= arr_max:
+		return false
+
+	if cursor_item["item_id"] == "":
+		return false
+
+	var place_amount: int = cursor_item["amount"] if amount == -1 else mini(amount, cursor_item["amount"])
+	if place_amount <= 0:
+		return false
+
+	# Equipment slot validation
+	if area == "equipment":
+		var equip_slot: int = ItemDatabase.get_equip_slot(cursor_item["item_id"])
+		if equip_slot != index:
+			return false
+		# Equipment slots always have amount=1
+		place_amount = 1
+
+	var slot: Dictionary = arr[index]
+
+	# Empty slot: place items
+	if slot["item_id"] == "":
+		arr[index] = {"item_id": cursor_item["item_id"], "amount": place_amount, "quality": cursor_item["quality"]}
+		cursor_item["amount"] -= place_amount
+		if cursor_item["amount"] <= 0:
+			cursor_item = _empty_slot()
+		if area == "equipment":
+			equipment_changed.emit(index)
+		cursor_item_changed.emit()
+		inventory_changed.emit()
+		return true
+
+	# Same item+quality: merge
+	if slot["item_id"] == cursor_item["item_id"] and slot["quality"] == cursor_item["quality"]:
+		if area == "equipment":
+			return false  # Equipment slots can't stack
+		var max_stack: int = ItemDatabase.get_max_stack(slot["item_id"])
+		var space: int = max_stack - slot["amount"]
+		if space <= 0:
+			return false
+		var to_move: int = mini(place_amount, space)
+		slot["amount"] += to_move
+		cursor_item["amount"] -= to_move
+		if cursor_item["amount"] <= 0:
+			cursor_item = _empty_slot()
+		cursor_item_changed.emit()
+		inventory_changed.emit()
+		return true
+
+	# Different item: swap (only for full stack placement)
+	if amount != -1:
+		return false  # Partial placement can't swap
+
+	var old_slot: Dictionary = slot.duplicate()
+	arr[index] = {"item_id": cursor_item["item_id"], "amount": place_amount, "quality": cursor_item["quality"]}
+	cursor_item = old_slot
+	if area == "equipment":
+		equipment_changed.emit(index)
+	cursor_item_changed.emit()
+	inventory_changed.emit()
+	return true
+
+
+## Quick-move an item (shift+click behavior).
+## If equippable and equipment slot empty: equip it.
+## Otherwise: move between main <-> hotbar (stack first, then empty slots).
+func request_quick_move(area: String, index: int) -> bool:
+	var arr: Array[Dictionary] = _get_inv_array(area)
+	var arr_max: int = _get_inv_max(area)
+	if index < 0 or index >= arr_max:
+		return false
+
+	var slot: Dictionary = arr[index]
+	if slot["item_id"] == "":
+		return false
+
+	# Try equipping if item is equippable and slot is empty
+	if area != "equipment":
+		var equip_slot: int = ItemDatabase.get_equip_slot(slot["item_id"])
+		if equip_slot >= 0 and equip_slot < EQUIP_SLOTS:
+			if inventory_equipment[equip_slot]["item_id"] == "":
+				inventory_equipment[equip_slot] = {"item_id": slot["item_id"], "amount": 1, "quality": slot["quality"]}
+				slot["amount"] -= 1
+				if slot["amount"] <= 0:
+					arr[index] = _empty_slot()
+				equipment_changed.emit(equip_slot)
+				inventory_changed.emit()
+				return true
+
+	# Move from equipment to inventory
+	if area == "equipment":
+		var eq_item_id: String = slot["item_id"]
+		var eq_quality: int = slot["quality"]
+		var eq_stack_max: int = ItemDatabase.get_max_stack(eq_item_id)
+		var moved: bool = false
+		# Try stacking into hotbar first, then main
+		for target_slot in inventory_hotbar:
+			if target_slot["item_id"] == eq_item_id and target_slot["quality"] == eq_quality:
+				if target_slot["amount"] < eq_stack_max:
+					target_slot["amount"] += 1
+					arr[index] = _empty_slot()
+					moved = true
+					break
+		if not moved:
+			for target_slot in inventory_main:
+				if target_slot["item_id"] == eq_item_id and target_slot["quality"] == eq_quality:
+					if target_slot["amount"] < eq_stack_max:
+						target_slot["amount"] += 1
+						arr[index] = _empty_slot()
+						moved = true
+						break
+		if not moved:
+			for target_slot in inventory_hotbar:
+				if target_slot["item_id"] == "":
+					target_slot["item_id"] = eq_item_id
+					target_slot["amount"] = 1
+					target_slot["quality"] = eq_quality
+					arr[index] = _empty_slot()
+					moved = true
+					break
+		if not moved:
+			for target_slot in inventory_main:
+				if target_slot["item_id"] == "":
+					target_slot["item_id"] = eq_item_id
+					target_slot["amount"] = 1
+					target_slot["quality"] = eq_quality
+					arr[index] = _empty_slot()
+					moved = true
+					break
+		if moved:
+			equipment_changed.emit(index)
+			inventory_changed.emit()
+		return moved
+
+	# Move between main <-> hotbar
+	var target_arr: Array[Dictionary]
+	var target_max: int
+	if area == "main":
+		target_arr = inventory_hotbar
+		target_max = HOTBAR_SLOTS
+	else:
+		target_arr = inventory_main
+		target_max = MAIN_SLOTS
+
+	var item_id: String = slot["item_id"]
+	var quality: int = slot["quality"]
+	var remaining: int = slot["amount"]
+	var max_stack: int = ItemDatabase.get_max_stack(item_id)
+
+	# Pass 1: Stack into matching slots in target
+	for i in range(target_max):
+		if remaining <= 0:
+			break
+		var target_slot: Dictionary = target_arr[i]
+		if target_slot["item_id"] == item_id and target_slot["quality"] == quality:
+			var space: int = max_stack - target_slot["amount"]
+			if space > 0:
+				var to_move: int = mini(remaining, space)
+				target_slot["amount"] += to_move
+				remaining -= to_move
+
+	# Pass 2: Place into empty slots in target
+	for i in range(target_max):
+		if remaining <= 0:
+			break
+		var target_slot: Dictionary = target_arr[i]
+		if target_slot["item_id"] == "":
+			var to_move: int = mini(remaining, max_stack)
+			target_arr[i] = {"item_id": item_id, "amount": to_move, "quality": quality}
+			remaining -= to_move
+
+	if remaining < slot["amount"]:
+		if remaining <= 0:
+			arr[index] = _empty_slot()
+		else:
+			slot["amount"] = remaining
+		inventory_changed.emit()
+		return true
+
+	return false
+
+
+## Sum a stat bonus from all equipped items' metadata.
+func get_equipment_stat_bonus(stat_name: String) -> float:
+	var total: float = 0.0
+	for slot in inventory_equipment:
+		if slot["item_id"] == "":
+			continue
+		var item_data: Dictionary = ItemDatabase.get_item(slot["item_id"])
+		if item_data.is_empty():
+			continue
+		var metadata = item_data.get("metadata", {})
+		if metadata is Dictionary:
+			var stats = metadata.get("stats", {})
+			if stats is Dictionary and stats.has(stat_name):
+				total += float(stats[stat_name])
+	return total
+
+
+## Force cursor item back into inventory. Called when closing inventory.
+func _return_cursor_item() -> void:
+	if cursor_item["item_id"] == "":
+		return
+	var remainder: int = request_add_item(cursor_item["item_id"], cursor_item["amount"], cursor_item["quality"])
+	if remainder <= 0:
+		cursor_item = _empty_slot()
+	else:
+		cursor_item["amount"] = remainder
+	cursor_item_changed.emit()
 
 
 ## Place a tile from inventory. Wraps request_place() with inventory deduction.

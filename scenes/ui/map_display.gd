@@ -111,11 +111,23 @@ func _ready() -> void:
 	add_child(map_sprite)
 
 
+func _input(event: InputEvent) -> void:
+	if is_open and event.is_action_pressed("pause"):
+		is_open = false
+		visible = false
+		is_dragging = false
+		drag_pixel_offset = Vector2.ZERO
+		map_sprite.position = map_center
+		GameServer.map_open = false
+		get_viewport().set_input_as_handled()
+
+
 func _process(_delta: float) -> void:
 	# Toggle map
-	if InputManager.is_map_toggle_just_pressed():
+	if not DebugConsole.console_open and InputManager.is_map_toggle_just_pressed():
 		is_open = not is_open
 		visible = is_open
+		GameServer.map_open = is_open
 		if is_open:
 			_update_viewport_dimensions()
 			if map_image.get_width() != map_buf_width or map_image.get_height() != map_buf_height:
@@ -132,7 +144,7 @@ func _process(_delta: float) -> void:
 			map_sprite.position = map_center
 
 	# Toggle fog (re-render if map is open)
-	if InputManager.is_debug_fog_toggle_just_pressed():
+	if not DebugConsole.console_open and InputManager.is_debug_fog_toggle_just_pressed():
 		ExplorationTracker.toggle_debug_fog()
 		if is_open:
 			_render_map()

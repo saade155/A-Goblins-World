@@ -287,6 +287,7 @@ func save_state(player_position: Vector2, playtime_seconds: float) -> void:
 		"player_position_y": player_position.y,
 		"inventory_main": GameServer.inventory_main,
 		"inventory_hotbar": GameServer.inventory_hotbar,
+		"inventory_equipment": GameServer.inventory_equipment,
 		"selected_hotbar": GameServer.selected_hotbar_slot,
 		"playtime_seconds": playtime_seconds,
 		"last_played": Time.get_datetime_string_from_system(),
@@ -312,6 +313,10 @@ func load_state() -> Variant:
 		GameServer.inventory_main = data["inventory_main"]
 		GameServer.inventory_hotbar = data["inventory_hotbar"]
 		GameServer.selected_hotbar_slot = data.get("selected_hotbar", 0)
+		if data.has("inventory_equipment"):
+			GameServer.inventory_equipment = data["inventory_equipment"]
+		else:
+			GameServer._initialize_equipment()
 		GameServer.inventory_changed.emit()
 
 	return data

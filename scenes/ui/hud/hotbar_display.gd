@@ -1,6 +1,6 @@
 ## HotbarDisplay - Visual hotbar with 10 clickable slots.
 ##
-## Shows item icons as colored rectangles (sprite-ready for future art).
+## Shows item icon textures when available, falling back to colored rectangles.
 ## Scroll wheel cycles slots. Click selects. Number keys handled by InputManager.
 
 extends Control
@@ -22,8 +22,10 @@ const TORCH_COLOR := Color(0.9, 0.6, 0.2)
 const UNKNOWN_COLOR := Color(0.4, 0.4, 0.4)
 
 # --- Slot references ---
+var _placeholder_texture: Texture2D = preload("res://assets/items/placeholder_icon.png")
 var _slot_panels: Array[Panel] = []
 var _slot_icons: Array[ColorRect] = []
+var _slot_textures: Array[TextureRect] = []
 var _slot_counts: Array[Label] = []
 var _slot_styles: Array[StyleBoxFlat] = []
 
@@ -57,7 +59,7 @@ func _build_slots() -> void:
 		_slot_panels.append(panel)
 		_slot_styles.append(style)
 
-		# Item color icon (placeholder for future TextureRect)
+		# Item color icon (fallback when no texture exists)
 		var icon := ColorRect.new()
 		icon.position = Vector2(ICON_OFFSET, ICON_OFFSET)
 		icon.size = Vector2(ICON_SIZE, ICON_SIZE)
@@ -65,6 +67,17 @@ func _build_slots() -> void:
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		panel.add_child(icon)
 		_slot_icons.append(icon)
+
+		# Item texture icon (shown when icon.png exists for the item)
+		var tex_rect := TextureRect.new()
+		tex_rect.position = Vector2(ICON_OFFSET, ICON_OFFSET)
+		tex_rect.size = Vector2(ICON_SIZE, ICON_SIZE)
+		tex_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tex_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tex_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		tex_rect.visible = false
+		panel.add_child(tex_rect)
+		_slot_textures.append(tex_rect)
 
 		# Stack count label (bottom right corner)
 		var count_label := Label.new()
@@ -113,10 +126,18 @@ func _update_all() -> void:
 	for i in range(SLOT_COUNT):
 		var slot: Dictionary = GameServer.get_hotbar_slot(i)
 		if slot["item_id"] == "":
-			_slot_icons[i].color = Color.TRANSPARENT
+			_slot_textures[i].visible = false
+			_slot_textures[i].texture = null
+			_slot_icons[i].visible = false
 			_slot_counts[i].text = ""
 		else:
-			_slot_icons[i].color = _get_item_color(slot["item_id"])
+			var icon_path: String = ItemDatabase.get_icon_path(slot["item_id"])
+			if ResourceLoader.exists(icon_path):
+				_slot_textures[i].texture = load(icon_path)
+			else:
+				_slot_textures[i].texture = _placeholder_texture
+			_slot_textures[i].visible = true
+			_slot_icons[i].visible = false  # Never need ColorRect anymore
 			if slot["amount"] > 1:
 				_slot_counts[i].text = str(slot["amount"])
 			else:
@@ -138,12 +159,24 @@ func _on_slot_clicked(slot: int) -> void:
 
 
 func _get_item_color(item_id: String) -> Color:
-	# Try to get the tile color from TileDatabase
+	# Tile-based items get their biome color
 	var tile_type: int = ItemDatabase.get_tile_type(item_id)
 	if tile_type > 0:
 		var props: Dictionary = TileDatabase.get_properties(tile_type)
 		return props.get("color", UNKNOWN_COLOR)
-	# Special cases
+	# Special items
 	if item_id == "torch":
 		return TORCH_COLOR
-	return UNKNOWN_COLOR
+	# Equipment — distinct color per slot
+	if ItemDatabase.is_equippable(item_id):
+		var equip_slot: int = ItemDatabase.get_equip_slot(item_id)
+		match equip_slot:
+			0: return Color(0.6, 0.5, 0.35)   # HEAD - bronze
+			1: return Color(0.5, 0.5, 0.55)   # CHEST - steel
+			2: return Color(0.55, 0.4, 0.25)  # BELT - leather
+			3: return Color(0.45, 0.45, 0.5)  # ARMS - iron
+			4: return Color(0.4, 0.4, 0.45)   # LEGS - iron
+			5: return Color(0.7, 0.7, 0.75)   # WEAPON - bright steel
+		return Color(0.6, 0.55, 0.5)  # fallback equipment color
+	# Unknown item — bright magenta to indicate missing icon
+	return Color(1.0, 0.0, 1.0)

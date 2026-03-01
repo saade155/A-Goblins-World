@@ -65,6 +65,7 @@ func reposition() -> void:
 	_hp_bg.position = hp_pos
 	_hp_fill.position = hp_pos
 	_hp_label.position = Vector2(BAR_X + 4, bar_start_y)
+	_hp_label.size = Vector2(BAR_WIDTH - 8, 14)
 
 	# MP bar — 12px tall
 	var mp_y: int = bar_start_y + 14 + BAR_GAP
@@ -72,6 +73,7 @@ func reposition() -> void:
 	_mp_bg.position = mp_pos
 	_mp_fill.position = mp_pos
 	_mp_label.position = Vector2(BAR_X + 4, mp_y)
+	_mp_label.size = Vector2(BAR_WIDTH - 8, 12)
 
 	# Stamina bar — 12px tall
 	var stam_y: int = mp_y + 12 + BAR_GAP
@@ -79,6 +81,7 @@ func reposition() -> void:
 	_stam_bg.position = stam_pos
 	_stam_fill.position = stam_pos
 	_stam_label.position = Vector2(BAR_X + 4, stam_y)
+	_stam_label.size = Vector2(BAR_WIDTH - 8, 12)
 
 
 func _create_bar(x: int, y: int, w: int, h: int, fill_color: Color, bg_color: Color) -> Array:
@@ -105,6 +108,7 @@ func _create_bar_label(x: int, y: int, w: int, h: int, prefix: String) -> Label:
 	var label := Label.new()
 	label.position = Vector2(x + 4, y)
 	label.size = Vector2(w - 8, h)
+	label.clip_text = true
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 8)
 	label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.9))
