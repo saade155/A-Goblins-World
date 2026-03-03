@@ -1,0 +1,264 @@
+{
+	"items": [
+		{
+			"id": "dirt",
+			"name": "Dirt",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "DIRT",
+			"placeable": true,
+			"metadata": { "render_mode": "tileset" }
+		},
+		{
+			"id": "stone",
+			"name": "Stone",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "STONE",
+			"placeable": true
+		},
+		{
+			"id": "iron_ore",
+			"name": "Iron Ore",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "IRON_ORE",
+			"placeable": false
+		},
+		{
+			"id": "hard_stone",
+			"name": "Hard Stone",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "HARD_STONE",
+			"placeable": true
+		},
+		{
+			"id": "copper_ore",
+			"name": "Copper Ore",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "COPPER_ORE",
+			"placeable": false
+		},
+		{
+			"id": "gold_ore",
+			"name": "Gold Ore",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "GOLD_ORE",
+			"placeable": false
+		},
+		{
+			"id": "crystal",
+			"name": "Crystal",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "CRYSTAL",
+			"placeable": false
+		},
+		{
+			"id": "deep_rock",
+			"name": "Deep Rock",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "DEEP_ROCK",
+			"placeable": false
+		},
+		{
+			"id": "sand",
+			"name": "Sand",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "SAND",
+			"placeable": true
+		},
+		{
+			"id": "sandstone",
+			"name": "Sandstone",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "SANDSTONE",
+			"placeable": true
+		},
+		{
+			"id": "mud",
+			"name": "Mud",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "MUD",
+			"placeable": true
+		},
+		{
+			"id": "mossy_stone",
+			"name": "Mossy Stone",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "MOSSY_STONE",
+			"placeable": true
+		},
+		{
+			"id": "mycelium",
+			"name": "Mycelium",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "MYCELIUM",
+			"placeable": true
+		},
+		{
+			"id": "volcanic_rock",
+			"name": "Volcanic Rock",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "VOLCANIC_ROCK",
+			"placeable": false
+		},
+		{
+			"id": "obsidian",
+			"name": "Obsidian",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "OBSIDIAN",
+			"placeable": false
+		},
+		{
+			"id": "ice",
+			"name": "Ice",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "ICE",
+			"placeable": true
+		},
+		{
+			"id": "frozen_stone",
+			"name": "Frozen Stone",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "FROZEN_STONE",
+			"placeable": true
+		},
+		{
+			"id": "ruby_ore",
+			"name": "Ruby Ore",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "RUBY_ORE",
+			"placeable": false
+		},
+		{
+			"id": "emerald_ore",
+			"name": "Emerald Ore",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "EMERALD_ORE",
+			"placeable": false
+		},
+		{
+			"id": "grass",
+			"name": "Grass",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "GRASS",
+			"placeable": true
+		},
+		{
+			"id": "snow",
+			"name": "Snow",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "SNOW",
+			"placeable": true
+		},
+		{
+			"id": "clay",
+			"name": "Clay",
+			"type": "MATERIAL",
+			"max_stack": 999,
+			"tile_type": "CLAY",
+			"placeable": true
+		},
+		{
+			"id": "torch",
+			"name": "Torch",
+			"type": "PLACEABLE",
+			"max_stack": 999,
+			"tile_type": null,
+			"placeable": true
+		},
+		{
+			"id": "iron_helmet",
+			"name": "Iron Helmet",
+			"type": "EQUIPMENT",
+			"max_stack": 1,
+			"tile_type": null,
+			"placeable": false,
+			"metadata": {
+				"equip_slot": 0,
+				"equip_mode": "overlay",
+				"equip_layers": ["head"],
+				"stats": { "defense": 2.0 },
+				"description": "A sturdy iron helmet."
+			}
+		},
+		{
+			"id": "iron_chestplate",
+			"name": "Iron Chestplate",
+			"type": "EQUIPMENT",
+			"max_stack": 1,
+			"tile_type": null,
+			"placeable": false,
+			"metadata": {
+				"equip_slot": 1,
+				"equip_mode": "replace",
+				"equip_layers": ["chest"],
+				"stats": { "defense": 4.0 },
+				"description": "Basic iron chest armor."
+			}
+		},
+		{
+			"id": "leather_belt",
+			"name": "Leather Belt",
+			"type": "EQUIPMENT",
+			"max_stack": 1,
+			"tile_type": null,
+			"placeable": false,
+			"metadata": {
+				"equip_slot": 2,
+				"equip_mode": "replace",
+				"equip_layers": ["belt"],
+				"stats": { "carry_bonus": 5.0 },
+				"description": "A simple leather belt."
+			}
+		},
+		{
+			"id": "iron_gauntlets",
+			"name": "Iron Gauntlets",
+			"type": "EQUIPMENT",
+			"max_stack": 1,
+			"tile_type": null,
+			"placeable": false,
+			"metadata": {
+				"equip_slot": 3,
+				"equip_mode": "replace",
+				"equip_layers": ["back_arm", "front_arm"],
+				"stats": { "mining_power": 1.0 },
+				"description": "Reinforced iron gauntlets."
+			}
+		},
+		{
+			"id": "iron_greaves",
+			"name": "Iron Greaves",
+			"type": "EQUIPMENT",
+			"max_stack": 1,
+			"tile_type": null,
+			"placeable": false,
+			"metadata": {
+				"equip_slot": 4,
+				"equip_mode": "replace",
+				"equip_layers": ["back_leg", "front_leg"],
+				"stats": { "defense": 3.0 },
+				"description": "Protective leg armor."
+			}
+		}
+	]
+}

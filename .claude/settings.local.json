@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/c/Program Files/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe\" --version)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(git -C \"c:/Projects/git/Mining Game\" add project.godot .gitignore scenes/ scripts/ assets/ resources/ docs/)",
+      "Bash(git -C \"c:/Projects/git/Mining Game\" status)",
+      "Bash(git -C \"c:/Projects/git/Mining Game\" commit -m \"$\\(cat <<''EOF''\nInitial project setup: This Goblin''s World\n\nGodot 4.5 project with core movement, architectural foundation,\nand game design documentation.\n\n- Player movement with acceleration, coyote time, jump buffer\n- Autoload architecture: GameServer, GameState, InputManager, BehaviorTracker\n- Test room with platforms for movement testing\n- Camera with dead zone follow\n- Game design doc and implementation plan\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git config:*)",
+      "Bash(pip install:*)",
+      "Bash(ls \"c:\\\\Projects\\\\git\\\\Mining Game\\\\scenes\\\\menus\"\" 2>&1 || echo \"Directory does not exist \")",
+      "Bash(\"C:/Program Files/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe\" --headless --path \"c:/Projects/git/Mining Game\" --quit)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nMilestone 4B: Menus, save slots, and game flow infrastructure\n\nTitle screen with New Game/Load/Settings/Quit, pause menu with\nsave & quit and quit to desktop, reusable settings menu \\(audio/video\\),\nmulti-world save slots with metadata, loading overlay during chunk\ngeneration, and SettingsManager autoload for persistent user settings.\n\nAlso adds M4.5 \\(player animations\\), M4.6 \\(tile edge & ore overlay\\),\nand M4.7 \\(enhanced save system\\) milestones to the implementation plan.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(where:*)",
+      "Bash(dir:*)",
+      "Bash(git commit:*)",
+      "Bash(ls \"c:\\\\Projects\\\\git\\\\Mining Game\\\\docs\\\\plans\"\" 2>nul || echo \"Plans directory not found \")",
+      "Bash(reg query:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(\"C:\\\\Users\\\\saade\\\\Downloads\\\\Godot_v4.5.1-stable_mono_win64\\\\Godot_v4.5.1-stable_mono_win64\\\\Godot_v4.5.1-stable_mono_win64_console.exe\" --headless --quit --path \"c:\\\\Projects\\\\git\\\\Mining Game\")",
+      "Bash(godot --headless --quit:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(ls \"c:\\\\Projects\\\\git\\\\Mining Game\\\\.claude-memory\"\" 2>nul || echo \"directory does not exist \")",
+      "Bash(\"/c/Program Files/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe\" --headless --quit)",
+      "Bash(ls:*)",
+      "Bash(cd:*)",
+      "Bash(find:*)",
+      "Bash(git status:*)"
+    ]
+  }
+}

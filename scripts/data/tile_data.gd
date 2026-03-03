@@ -489,3 +489,88 @@ func get_tile_name(tile_type: int) -> String:
 ## Get the TileType from an item name string. Returns EMPTY if not found.
 func get_tile_from_item(item_name: String) -> int:
 	return item_to_tile.get(item_name, TileType.EMPTY)
+
+
+# --- Render configuration cache ---
+
+## Cached render configuration per tile type. Populated on first access.
+var _render_config: Dictionary = {}
+var _render_config_built: bool = false
+
+
+## Build render config cache by scanning tile properties and ItemDatabase metadata.
+## Called lazily on first render config access (ItemDatabase must be ready first).
+func _build_render_config() -> void:
+	_render_config.clear()
+	for tile_type in tile_properties.keys():
+		var props: Dictionary = tile_properties[tile_type]
+		var drop_item: String = props.get("drop_item", "")
+		if drop_item == "":
+			continue
+		var meta: Dictionary = ItemDatabase.get_item_metadata(drop_item)
+		var mode: String = meta.get("render_mode", "")
+		if mode == "":
+			continue
+		var config: Dictionary = {"render_mode": mode, "drop_item": drop_item}
+		if mode == "splat":
+			config["splat_variants"] = meta.get("splat_variants", [])
+			config["splat_surface_variants"] = meta.get("splat_surface_variants", [])
+		_render_config[tile_type] = config
+	_render_config_built = true
+	print("[TileDatabase] Render config built: %d tile types with art assets." % _render_config.size())
+
+
+func _ensure_render_config() -> void:
+	if not _render_config_built:
+		_build_render_config()
+
+
+## Get render mode for a tile type: "tileset", "splat", or "" (fallback to colored rect).
+func get_render_mode(tile_type: int) -> String:
+	_ensure_render_config()
+	var config: Dictionary = _render_config.get(tile_type, {})
+	return config.get("render_mode", "")
+
+
+## Get path to tileset PNG for a tileset-mode tile type.
+func get_tileset_path(tile_type: int) -> String:
+	_ensure_render_config()
+	var config: Dictionary = _render_config.get(tile_type, {})
+	var drop_item: String = config.get("drop_item", "")
+	if drop_item == "":
+		return ""
+	return "res://assets/items/%s/tiles.png" % drop_item
+
+
+## Get path to back wall tileset PNG for a tileset-mode tile type.
+func get_back_wall_path(tile_type: int) -> String:
+	_ensure_render_config()
+	var config: Dictionary = _render_config.get(tile_type, {})
+	var drop_item: String = config.get("drop_item", "")
+	if drop_item == "":
+		return ""
+	return "res://assets/items/%s/back_wall.png" % drop_item
+
+
+## Get full paths to splat variant PNGs for a splat-mode tile type.
+func get_splat_variants(tile_type: int) -> Array:
+	_ensure_render_config()
+	var config: Dictionary = _render_config.get(tile_type, {})
+	var drop_item: String = config.get("drop_item", "")
+	var filenames: Array = config.get("splat_variants", [])
+	var paths: Array = []
+	for f in filenames:
+		paths.append("res://assets/items/%s/%s" % [drop_item, f])
+	return paths
+
+
+## Get full paths to surface splat variant PNGs for a splat-mode tile type.
+func get_splat_surface_variants(tile_type: int) -> Array:
+	_ensure_render_config()
+	var config: Dictionary = _render_config.get(tile_type, {})
+	var drop_item: String = config.get("drop_item", "")
+	var filenames: Array = config.get("splat_surface_variants", [])
+	var paths: Array = []
+	for f in filenames:
+		paths.append("res://assets/items/%s/%s" % [drop_item, f])
+	return paths

@@ -166,6 +166,18 @@ var _world_gen_thread: Thread = null
 ## Reference to loading overlay for progress updates during world generation.
 var _loading_overlay = null
 
+## Autotile source IDs: tile_type (int) -> source_id (int) in shared_tileset.
+var _autotile_source_ids: Dictionary = {}
+
+## Back wall autotile source IDs: tile_type (int) -> source_id (int).
+var _back_wall_source_ids: Dictionary = {}
+
+## Bitmask -> atlas coords lookup for 47-tile blob autotile.
+var _bitmask_to_atlas: Dictionary = {}
+
+## Next available source ID for autotile atlas sources.
+var _next_source_id: int = 1
+
 ## Emitted when a chunk is loaded into the scene.
 signal chunk_loaded(chunk_coord: Vector2i)
 
@@ -611,7 +623,7 @@ func _create_chunk_visuals(chunk_coord: Vector2i) -> void:
 			var wpos: Vector2i = origin + Vector2i(x, y)
 			var wall_type: int = world_data.get_back_wall(wpos)
 			if wall_type != 0:
-				var visual: Dictionary = _get_tile_visual(wpos, wall_type)
+				var visual: Dictionary = _get_back_wall_visual(wpos, wall_type)
 				back_wall_tilemap.set_cell(Vector2i(x, y), visual["source_id"], visual["atlas_coords"])
 
 	add_child(back_wall_tilemap)
@@ -762,6 +774,9 @@ func _on_back_wall_mined(world_pos: Vector2i, tile_type: int) -> void:
 		var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
 		back_wall_tilemap.erase_cell(local_pos)
 
+	# Update neighbor back wall visuals (autotile bitmask changes)
+	_update_back_wall_neighbor_visuals(world_pos)
+
 	# Spawn dropped item for the mined back wall
 	_spawn_dropped_item(world_pos, tile_type)
 
@@ -776,8 +791,11 @@ func _on_back_wall_placed(world_pos: Vector2i, tile_type: int) -> void:
 	var back_wall_tilemap: TileMapLayer = _get_back_wall_tilemap(chunk_coord)
 	if back_wall_tilemap:
 		var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
-		var visual: Dictionary = _get_tile_visual(world_pos, tile_type)
+		var visual: Dictionary = _get_back_wall_visual(world_pos, tile_type)
 		back_wall_tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
+
+	# Update neighbor back wall visuals
+	_update_back_wall_neighbor_visuals(world_pos)
 
 	_update_player_light(_last_fog_player_tile)
 
@@ -820,6 +838,12 @@ func _build_tileset() -> TileSet:
 
 	# Source ID 0: Programmatic colored tiles
 	_add_programmatic_atlas(ts)
+
+	# Build bitmask lookup table for 47-tile blob autotile
+	_build_bitmask_lookup()
+
+	# Add autotile atlas sources for tile types with tileset art
+	_add_autotile_sources(ts)
 
 	return ts
 
@@ -868,11 +892,214 @@ func _hash_pixel(x: int, y: int) -> float:
 	return absf(float(h % 1000) / 1000.0)
 
 
+## Build the bitmask -> atlas coords lookup table for 47-tile blob autotile.
+## The atlas is a 12x4 grid (48 cells, 47 used + 1 empty).
+## Bitmask bits: N=1, NE=2, E=4, SE=8, S=16, SW=32, W=64, NW=128.
+func _build_bitmask_lookup() -> void:
+	_bitmask_to_atlas = {
+		# Block 1: No-diagonal basic tiles (cols 0-3)
+		# Col 0: Vertical pipe variants
+		16: Vector2i(0, 0),      # S
+		17: Vector2i(0, 1),      # N+S
+		1: Vector2i(0, 2),       # N
+		0: Vector2i(0, 3),       # Isolated
+		# Col 1: Right-facing L variants
+		20: Vector2i(1, 0),      # E+S
+		21: Vector2i(1, 1),      # N+E+S
+		5: Vector2i(1, 2),       # N+E
+		4: Vector2i(1, 3),       # E
+		# Col 2: T/cross variants
+		84: Vector2i(2, 0),      # E+S+W
+		85: Vector2i(2, 1),      # N+E+S+W
+		69: Vector2i(2, 2),      # N+E+W
+		68: Vector2i(2, 3),      # E+W
+		# Col 3: Left-facing L variants
+		80: Vector2i(3, 0),      # S+W
+		81: Vector2i(3, 1),      # N+S+W
+		65: Vector2i(3, 2),      # N+W
+		64: Vector2i(3, 3),      # W
+		# Block 2: Diagonal variants (cols 4-7)
+		213: Vector2i(4, 0),     # N+E+S+W+NW
+		29: Vector2i(4, 1),      # N+E+SE+S
+		23: Vector2i(4, 2),      # N+NE+E+S
+		117: Vector2i(4, 3),     # N+E+S+SW+W
+		92: Vector2i(5, 0),      # E+SE+S+W
+		127: Vector2i(5, 1),     # All except NW
+		223: Vector2i(5, 2),     # All except SW
+		71: Vector2i(5, 3),      # N+NE+E+W
+		116: Vector2i(6, 0),     # E+S+SW+W
+		253: Vector2i(6, 1),     # All except NE
+		247: Vector2i(6, 2),     # All except SE
+		197: Vector2i(6, 3),     # N+E+W+NW
+		87: Vector2i(7, 0),      # N+NE+E+S+W
+		113: Vector2i(7, 1),     # N+S+SW+W
+		209: Vector2i(7, 2),     # N+S+W+NW
+		93: Vector2i(7, 3),      # N+E+SE+S+W
+		# Block 3: Full corners/edges with diagonals (cols 8-11)
+		28: Vector2i(8, 0),      # E+SE+S
+		31: Vector2i(8, 1),      # N+NE+E+SE+S
+		95: Vector2i(8, 2),      # N+NE+E+SE+S+W
+		7: Vector2i(8, 3),       # N+NE+E
+		125: Vector2i(9, 0),     # N+E+SE+S+SW+W
+		119: Vector2i(9, 1),     # N+NE+E+S+SW+W
+		255: Vector2i(9, 2),     # All filled
+		199: Vector2i(9, 3),     # N+NE+E+W+NW
+		124: Vector2i(10, 0),    # E+SE+S+SW+W
+		# (10, 1) is empty — no bitmask maps here
+		221: Vector2i(10, 2),    # N+E+SE+S+W+NW
+		215: Vector2i(10, 3),    # N+NE+E+S+W+NW
+		112: Vector2i(11, 0),    # S+SW+W
+		245: Vector2i(11, 1),    # N+E+S+SW+W+NW
+		241: Vector2i(11, 2),    # N+S+SW+W+NW
+		193: Vector2i(11, 3),    # N+W+NW
+	}
+
+
+## Add TileSetAtlasSource entries for each tileset-mode tile type.
+## Each type with a tiles.png gets its own atlas source in the shared tileset.
+func _add_autotile_sources(ts: TileSet) -> void:
+	var tile_types: Array = TileDatabase.get_tile_types()
+	for tile_type in tile_types:
+		var render_mode: String = TileDatabase.get_render_mode(tile_type)
+		if render_mode != "tileset":
+			continue
+
+		var tileset_path: String = TileDatabase.get_tileset_path(tile_type)
+		if tileset_path == "" or not ResourceLoader.exists(tileset_path):
+			continue
+
+		var tex: Texture2D = load(tileset_path)
+		if tex == null:
+			push_warning("[ChunkManager] Failed to load tileset texture: %s" % tileset_path)
+			continue
+
+		var atlas := TileSetAtlasSource.new()
+		atlas.texture = tex
+		atlas.texture_region_size = Vector2i(TILE_SIZE, TILE_SIZE)
+
+		# Must add source to tileset BEFORE adding collision — tile data needs
+		# the physics layer from the tileset to accept collision polygons.
+		var source_id: int = ts.add_source(atlas, _next_source_id)
+
+		# Create tiles for all 48 cells in the 12x4 grid
+		for row in range(4):
+			for col in range(12):
+				var coords := Vector2i(col, row)
+				atlas.create_tile(coords)
+				var tile_data: TileData = atlas.get_tile_data(coords, 0)
+				tile_data.add_collision_polygon(0)
+				tile_data.set_collision_polygon_points(0, 0, collision_polygon)
+		_autotile_source_ids[tile_type] = source_id
+		_next_source_id = source_id + 1
+
+		# Also try loading back_wall.png for this tile type
+		var back_wall_path: String = TileDatabase.get_back_wall_path(tile_type)
+		if back_wall_path != "" and ResourceLoader.exists(back_wall_path):
+			var bw_tex: Texture2D = load(back_wall_path)
+			if bw_tex != null:
+				var bw_atlas := TileSetAtlasSource.new()
+				bw_atlas.texture = bw_tex
+				bw_atlas.texture_region_size = Vector2i(TILE_SIZE, TILE_SIZE)
+				for row in range(4):
+					for col in range(12):
+						var coords := Vector2i(col, row)
+						bw_atlas.create_tile(coords)
+						# No collision for back wall tiles
+				var bw_source_id: int = ts.add_source(bw_atlas, _next_source_id)
+				_back_wall_source_ids[tile_type] = bw_source_id
+				_next_source_id = bw_source_id + 1
+
+		print("[ChunkManager] Autotile source added for tile type %d: source_id=%d" % [tile_type, source_id])
+
+	print("[ChunkManager] Autotile setup complete: %d foreground, %d back wall sources." % [_autotile_source_ids.size(), _back_wall_source_ids.size()])
+
+
+## Compute the 8-neighbor bitmask for a tile at world_pos.
+## Checks world_data.has_tile() for each of 8 neighbors.
+## Diagonal bits only set if both adjacent cardinals are also filled.
+## Returns a value that maps to _bitmask_to_atlas.
+func _compute_bitmask(world_pos: Vector2i) -> int:
+	var n: bool = world_data.has_tile(world_pos + Vector2i(0, -1))
+	var e: bool = world_data.has_tile(world_pos + Vector2i(1, 0))
+	var s: bool = world_data.has_tile(world_pos + Vector2i(0, 1))
+	var w: bool = world_data.has_tile(world_pos + Vector2i(-1, 0))
+
+	var bitmask: int = 0
+	if n: bitmask |= 1
+	if e: bitmask |= 4
+	if s: bitmask |= 16
+	if w: bitmask |= 64
+
+	# Diagonals only count if both adjacent cardinals are filled
+	if n and e and world_data.has_tile(world_pos + Vector2i(1, -1)):
+		bitmask |= 2  # NE
+	if e and s and world_data.has_tile(world_pos + Vector2i(1, 1)):
+		bitmask |= 8  # SE
+	if s and w and world_data.has_tile(world_pos + Vector2i(-1, 1)):
+		bitmask |= 32  # SW
+	if w and n and world_data.has_tile(world_pos + Vector2i(-1, -1)):
+		bitmask |= 128  # NW
+
+	return bitmask
+
+
+## Compute the 8-neighbor bitmask for a back wall tile.
+## Same logic as _compute_bitmask but checks world_data.has_back_wall().
+func _compute_back_wall_bitmask(world_pos: Vector2i) -> int:
+	var n: bool = world_data.has_back_wall(world_pos + Vector2i(0, -1))
+	var e: bool = world_data.has_back_wall(world_pos + Vector2i(1, 0))
+	var s: bool = world_data.has_back_wall(world_pos + Vector2i(0, 1))
+	var w: bool = world_data.has_back_wall(world_pos + Vector2i(-1, 0))
+
+	var bitmask: int = 0
+	if n: bitmask |= 1
+	if e: bitmask |= 4
+	if s: bitmask |= 16
+	if w: bitmask |= 64
+
+	if n and e and world_data.has_back_wall(world_pos + Vector2i(1, -1)):
+		bitmask |= 2
+	if e and s and world_data.has_back_wall(world_pos + Vector2i(1, 1)):
+		bitmask |= 8
+	if s and w and world_data.has_back_wall(world_pos + Vector2i(-1, 1)):
+		bitmask |= 32
+	if w and n and world_data.has_back_wall(world_pos + Vector2i(-1, -1)):
+		bitmask |= 128
+
+	return bitmask
+
+
 # --- Tile visuals ---
 
-## Get the visual source_id and atlas_coords for a tile at a world position.
-## Always uses the programmatic colored atlas (source 0).
-func _get_tile_visual(_world_pos: Vector2i, tile_type: int) -> Dictionary:
+## Get the visual source_id and atlas_coords for a foreground tile.
+## Uses autotile bitmask for tileset-mode tiles, colored rect for fallback.
+func _get_tile_visual(world_pos: Vector2i, tile_type: int) -> Dictionary:
+	# Check if this tile type has an autotile source
+	if _autotile_source_ids.has(tile_type):
+		var bitmask: int = _compute_bitmask(world_pos)
+		var atlas_coords: Vector2i = _bitmask_to_atlas.get(bitmask, Vector2i(0, 0))
+		return {
+			"source_id": _autotile_source_ids[tile_type],
+			"atlas_coords": atlas_coords,
+		}
+	# Fallback: colored rectangle from programmatic atlas
+	return {
+		"source_id": 0,
+		"atlas_coords": TileDatabase.get_atlas_coords(tile_type),
+	}
+
+
+## Get the visual source_id and atlas_coords for a back wall tile.
+## Uses back wall autotile if available, otherwise falls back to colored rect.
+func _get_back_wall_visual(world_pos: Vector2i, tile_type: int) -> Dictionary:
+	if _back_wall_source_ids.has(tile_type):
+		var bitmask: int = _compute_back_wall_bitmask(world_pos)
+		var atlas_coords: Vector2i = _bitmask_to_atlas.get(bitmask, Vector2i(0, 0))
+		return {
+			"source_id": _back_wall_source_ids[tile_type],
+			"atlas_coords": atlas_coords,
+		}
+	# Fallback: use colored rect
 	return {
 		"source_id": 0,
 		"atlas_coords": TileDatabase.get_atlas_coords(tile_type),
@@ -902,6 +1129,30 @@ func _update_single_tile_visual(world_pos: Vector2i, tile_type: int) -> void:
 
 	var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
 	var visual: Dictionary = _get_tile_visual(world_pos, tile_type)
+	tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
+
+
+## Update visuals for all 8 back wall neighbors of a changed position.
+func _update_back_wall_neighbor_visuals(center_pos: Vector2i) -> void:
+	var all_offsets: Array[Vector2i] = [
+		Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0),
+		Vector2i(-1, -1), Vector2i(1, -1), Vector2i(1, 1), Vector2i(-1, 1),
+	]
+	for offset in all_offsets:
+		var neighbor_pos: Vector2i = center_pos + offset
+		var neighbor_type: int = world_data.get_back_wall(neighbor_pos)
+		if neighbor_type != 0:
+			_update_single_back_wall_visual(neighbor_pos, neighbor_type)
+
+
+## Recalculate and update the visual for a single back wall tile.
+func _update_single_back_wall_visual(world_pos: Vector2i, tile_type: int) -> void:
+	var chunk_coord: Vector2i = WorldData.world_to_chunk(world_pos)
+	var tilemap: TileMapLayer = _get_back_wall_tilemap(chunk_coord)
+	if tilemap == null:
+		return
+	var local_pos: Vector2i = world_pos - WorldData.chunk_to_world(chunk_coord)
+	var visual: Dictionary = _get_back_wall_visual(world_pos, tile_type)
 	tilemap.set_cell(local_pos, visual["source_id"], visual["atlas_coords"])
 
 

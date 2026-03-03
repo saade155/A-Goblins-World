@@ -603,9 +603,11 @@ func _on_equipment_changed(slot: int) -> void:
 
 	var mode: String = ItemDatabase.get_equip_mode(item_id)
 	var layers: Array = ItemDatabase.get_equip_layers(item_id)
+	print("[Player] Equipment changed slot %d: item=%s mode=%s layers=%s" % [slot, item_id, mode, str(layers)])
 
 	for layer_name in layers:
 		if not LAYER_NAME_TO_INDEX.has(layer_name):
+			print("[Player]   Layer '%s' not in LAYER_NAME_TO_INDEX, skipping" % layer_name)
 			continue
 		var sprite_idx: int = LAYER_NAME_TO_INDEX[layer_name]
 		var tex_path: String = "res://assets/items/%s/%s.png" % [item_id, layer_name]
@@ -613,6 +615,7 @@ func _on_equipment_changed(slot: int) -> void:
 			push_warning("[Player] Equipment texture not found: %s" % tex_path)
 			continue
 		var tex: Texture2D = load(tex_path)
+		print("[Player]   Layer '%s' idx=%d tex=%s loaded=%s" % [layer_name, sprite_idx, tex_path, tex != null])
 
 		if mode == "replace":
 			# Save the base texture so we can restore it on unequip.

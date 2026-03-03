@@ -3,8 +3,7 @@ extends Node
 ## ItemDatabase — Central registry for all item definitions.
 ##
 ## Registered as an autoload. Provides item properties, types, stacking limits,
-## and quality tiers. Auto-registers tile-derived items from TileDatabase on startup.
-## Non-tile items (tools, weapons, consumables) registered explicitly.
+## and quality tiers. Item definitions loaded from res://data/items.json on startup.
 
 ## Item type categories.
 enum ItemType {
@@ -30,83 +29,80 @@ enum Quality {
 ## Internal item registry: item_id (String) -> properties (Dictionary).
 var _items: Dictionary = {}
 
+## String-to-enum mapping for JSON type field.
+const _ITEM_TYPE_MAP: Dictionary = {
+	"MATERIAL": ItemType.MATERIAL,
+	"PLACEABLE": ItemType.PLACEABLE,
+	"TOOL": ItemType.TOOL,
+	"WEAPON": ItemType.WEAPON,
+	"CONSUMABLE": ItemType.CONSUMABLE,
+	"EQUIPMENT": ItemType.EQUIPMENT,
+}
+
 
 func _ready() -> void:
-	_register_all_items()
+	_load_items_from_json("res://data/items.json")
 	print("[ItemDatabase] Initialized with %d items." % _items.size())
 
 
-## Register a single item into the database.
-func _register(id: String, display_name: String, type: int, max_stack: int, tile_type: int = -1, placeable: bool = false, metadata: Dictionary = {}) -> void:
+## Load all item definitions from a JSON file.
+func _load_items_from_json(path: String) -> void:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		push_error("[ItemDatabase] Failed to open %s: %s" % [path, error_string(FileAccess.get_open_error())])
+		return
+
+	var text: String = file.get_as_text()
+	file.close()
+
+	var parsed = JSON.parse_string(text)
+	if parsed == null:
+		push_error("[ItemDatabase] Failed to parse JSON from %s" % path)
+		return
+
+	var item_list: Array = parsed.get("items", [])
+	for entry in item_list:
+		_load_item_entry(entry)
+
+
+## Parse and register a single item entry from JSON.
+func _load_item_entry(entry: Dictionary) -> void:
+	var id: String = entry.get("id", "")
+	if id == "":
+		push_warning("[ItemDatabase] Skipping item with missing 'id'")
+		return
+
+	var type_str: String = entry.get("type", "")
+	if not _ITEM_TYPE_MAP.has(type_str):
+		push_warning("[ItemDatabase] Item '%s' has invalid type '%s', skipping" % [id, type_str])
+		return
+	var type_int: int = _ITEM_TYPE_MAP[type_str]
+
+	# Resolve tile_type string to TileDatabase enum int.
+	var tile_type: int = -1
+	var tile_type_val = entry.get("tile_type")
+	if tile_type_val is String and tile_type_val != "":
+		tile_type = _resolve_tile_type(tile_type_val)
+		if tile_type == -1:
+			push_warning("[ItemDatabase] Item '%s' has invalid tile_type '%s'" % [id, tile_type_val])
+
 	_items[id] = {
 		"id": id,
-		"name": display_name,
-		"type": type,
-		"max_stack": max_stack,
+		"name": entry.get("name", id),
+		"type": type_int,
+		"max_stack": int(entry.get("max_stack", 1)),
 		"icon_path": "",
 		"tile_type": tile_type,
-		"placeable": placeable,
-		"metadata": metadata,
+		"placeable": entry.get("placeable", false),
+		"metadata": entry.get("metadata", {}),
 	}
 
 
-## Items that can be placed back into the world as tiles.
-## Ores, deep rock, volcanic rock, obsidian are NOT placeable.
-const _NON_PLACEABLE_ITEMS: Array[String] = [
-	"iron_ore", "copper_ore", "gold_ore", "crystal",
-	"ruby_ore", "emerald_ore", "deep_rock", "volcanic_rock", "obsidian",
-]
-
-
-## Register all items. Called once from _ready().
-func _register_all_items() -> void:
-	# Auto-register all tile drop items from TileDatabase.
-	# TileDatabase is an autoload that initializes before us (registered earlier in project.godot).
-	for tile_type_id in TileDatabase.get_tile_types():
-		var props: Dictionary = TileDatabase.get_properties(tile_type_id)
-		var drop_item: String = props.get("drop_item", "")
-		if drop_item != "":
-			var can_place: bool = drop_item not in _NON_PLACEABLE_ITEMS
-			_register(drop_item, props.get("name", drop_item), ItemType.MATERIAL, 999, tile_type_id, can_place)
-
-	# Torch — placeable but not a tile type in TileDatabase (handled specially by ChunkManager)
-	_register("torch", "Torch", ItemType.PLACEABLE, 999, -1, true)
-
-	# --- Equipment (M7 test items) ---
-	_register("iron_helmet", "Iron Helmet", ItemType.EQUIPMENT, 1, -1, false, {
-		"equip_slot": 0,
-		"equip_mode": "overlay",
-		"equip_layers": ["head"],
-		"stats": {"defense": 2.0},
-		"description": "A sturdy iron helmet.",
-	})
-	_register("iron_chestplate", "Iron Chestplate", ItemType.EQUIPMENT, 1, -1, false, {
-		"equip_slot": 1,
-		"stats": {"defense": 4.0},
-		"description": "Basic iron chest armor.",
-	})
-	_register("leather_belt", "Leather Belt", ItemType.EQUIPMENT, 1, -1, false, {
-		"equip_slot": 2,
-		"stats": {"carry_bonus": 5.0},
-		"description": "A simple leather belt.",
-	})
-	_register("iron_gauntlets", "Iron Gauntlets", ItemType.EQUIPMENT, 1, -1, false, {
-		"equip_slot": 3,
-		"stats": {"mining_power": 1.0},
-		"description": "Reinforced iron gauntlets.",
-	})
-	_register("iron_greaves", "Iron Greaves", ItemType.EQUIPMENT, 1, -1, false, {
-		"equip_slot": 4,
-		"stats": {"defense": 3.0},
-		"description": "Protective leg armor.",
-	})
-	# Slot 5 (BACK) — capes, backpacks, quivers, etc. No test item yet.
-
-	# Future items will be registered here:
-	# Tools (M4E)
-	# _register("wood_pickaxe", "Wood Pickaxe", ItemType.TOOL, 1, -1, {"tool_power": 1.0, "mining_speed_bonus": 0.0})
-	# _register("stone_pickaxe", "Stone Pickaxe", ItemType.TOOL, 1, -1, {"tool_power": 2.0, "mining_speed_bonus": 0.25})
-	# etc.
+## Resolve a tile type name string to its TileDatabase enum int.
+func _resolve_tile_type(type_name: String) -> int:
+	if TileDatabase.TileType.has(type_name):
+		return TileDatabase.TileType[type_name]
+	return -1
 
 
 ## Get the full properties dictionary for an item. Returns empty dict for unknown items.
@@ -162,7 +158,7 @@ func get_item_metadata(item_id: String) -> Dictionary:
 
 ## Get the equip slot index for an item. Returns -1 if not equippable.
 func get_equip_slot(item_id: String) -> int:
-	return get_item_metadata(item_id).get("equip_slot", -1)
+	return int(get_item_metadata(item_id).get("equip_slot", -1))
 
 
 ## Get the convention-based icon path for an item: res://assets/items/<item_id>/icon.png
@@ -197,5 +193,5 @@ func get_equip_layers(item_id: String) -> Array:
 	var layers = meta.get("equip_layers", [])
 	if layers.size() > 0:
 		return layers
-	var slot: int = meta.get("equip_slot", -1)
+	var slot: int = int(meta.get("equip_slot", -1))
 	return _SLOT_DEFAULT_LAYERS.get(slot, [])
