@@ -66,6 +66,55 @@ const SEA_LEVEL: int = -5
 ## MACRO_STEP tiles and looked up per macro cell for performance.
 const MACRO_STEP: int = 8
 
+## Base number of worms for a small (2400x800) world. Scaled by area ratio.
+const WORMS_BASE_COUNT: int = 18
+
+## Maximum recursion depth for branching worms.
+const MAX_BRANCH_DEPTH: int = 3
+
+## Worm archetypes with parameter ranges. Weight controls spawn frequency.
+const WORM_TYPES: Array[Dictionary] = [
+	{
+		"name": "explorer",
+		"length": [120, 300],
+		"base_radius": [2.0, 4.0],
+		"radius_amplitude": [1.0, 2.0],
+		"radius_frequency": [0.08, 0.15],
+		"angle_drift_max": [0.15, 0.30],
+		"vertical_bias": [-0.1, 0.2],
+		"branch_chance": [0.006, 0.015],
+		"start_depth_min": 10,
+		"start_depth_max": 800,
+		"weight": 5,
+	},
+	{
+		"name": "cavern",
+		"length": [40, 100],
+		"base_radius": [5.0, 9.0],
+		"radius_amplitude": [2.0, 4.0],
+		"radius_frequency": [0.05, 0.10],
+		"angle_drift_max": [0.20, 0.50],
+		"vertical_bias": [-0.05, 0.05],
+		"branch_chance": [0.01, 0.03],
+		"start_depth_min": 30,
+		"start_depth_max": 600,
+		"weight": 3,
+	},
+	{
+		"name": "shaft",
+		"length": [80, 200],
+		"base_radius": [1.5, 3.0],
+		"radius_amplitude": [0.5, 1.5],
+		"radius_frequency": [0.10, 0.20],
+		"angle_drift_max": [0.10, 0.20],
+		"vertical_bias": [0.4, 0.8],
+		"branch_chance": [0.003, 0.008],
+		"start_depth_min": 5,
+		"start_depth_max": 400,
+		"weight": 2,
+	},
+]
+
 ## Whether world generation has completed (used for async polling).
 var generation_complete: bool = false
 
@@ -212,6 +261,9 @@ func generate_world(world_data: WorldData) -> void:
 			if tile != 0:  # Not EMPTY
 				world_data.tiles[Vector2i(wx, wy)] = tile
 			generation_progress += 1
+
+	# Phase 2.5: Carve worm tunnels through the generated terrain
+	_generate_worm_caves(world_data)
 
 	# Phase 3: Generate back wall tiles
 	_generate_back_walls(world_data, w, sr, underground_depth)
@@ -711,3 +763,114 @@ func _generate_chunk_back_walls(chunk_coord: Vector2i, chunk_tiles: Dictionary) 
 func _hash_position(x: int, y: int) -> float:
 	var h: int = hash(Vector2i(x, y) * seed_value)
 	return absf(float(h) / float(2147483647))  # Normalize to 0-1
+
+
+# ===========================================================================
+#  Worm cave generation
+# ===========================================================================
+
+## Phase 2.5: Carve worm tunnels through the generated terrain.
+func _generate_worm_caves(world_data) -> void:
+	var w: int = world_data.world_width
+	var h: int = world_data.world_height
+	var sr: int = world_data.surface_rows
+	var underground_depth: int = h - sr
+
+	var worm_count: int = _get_worm_count(w, h)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value + 5000
+
+	for i in range(worm_count):
+		var worm_type: Dictionary = _pick_worm_type(rng)
+		var params: Dictionary = _randomize_worm_params(rng, worm_type)
+
+		var start_x: int = rng.randi_range(0, w - 1)
+		var min_y: int = maxi(1, worm_type["start_depth_min"])
+		var max_y: int = mini(underground_depth - 1, worm_type["start_depth_max"])
+		if min_y >= max_y:
+			continue
+		var start_y: int = rng.randi_range(min_y, max_y)
+
+		_run_worm(world_data, rng, Vector2(start_x, start_y), params, 0)
+
+
+func _get_worm_count(w: int, h: int) -> int:
+	var area: float = float(w * h)
+	var base_area: float = 2400.0 * 800.0
+	return int(WORMS_BASE_COUNT * (area / base_area))
+
+
+func _pick_worm_type(rng: RandomNumberGenerator) -> Dictionary:
+	var total_weight: int = 0
+	for wt in WORM_TYPES:
+		total_weight += wt["weight"]
+	var roll: int = rng.randi_range(0, total_weight - 1)
+	var cumulative: int = 0
+	for wt in WORM_TYPES:
+		cumulative += wt["weight"]
+		if roll < cumulative:
+			return wt
+	return WORM_TYPES[0]
+
+
+func _randomize_worm_params(rng: RandomNumberGenerator, worm_type: Dictionary) -> Dictionary:
+	return {
+		"length": rng.randi_range(worm_type["length"][0], worm_type["length"][1]),
+		"base_radius": rng.randf_range(worm_type["base_radius"][0], worm_type["base_radius"][1]),
+		"radius_amplitude": rng.randf_range(worm_type["radius_amplitude"][0], worm_type["radius_amplitude"][1]),
+		"radius_frequency": rng.randf_range(worm_type["radius_frequency"][0], worm_type["radius_frequency"][1]),
+		"angle_drift_max": rng.randf_range(worm_type["angle_drift_max"][0], worm_type["angle_drift_max"][1]),
+		"vertical_bias": rng.randf_range(worm_type["vertical_bias"][0], worm_type["vertical_bias"][1]),
+		"branch_chance": rng.randf_range(worm_type["branch_chance"][0], worm_type["branch_chance"][1]),
+	}
+
+
+func _run_worm(world_data, rng: RandomNumberGenerator,
+		start_pos: Vector2, params: Dictionary, branch_depth: int) -> void:
+	var pos: Vector2 = start_pos
+	var angle: float = rng.randf_range(0.0, TAU)
+	angle = lerp_angle(angle, PI / 2.0, params["vertical_bias"])
+
+	var w: int = world_data.world_width
+	var underground_depth: int = world_data.world_height - world_data.surface_rows
+
+	for step in range(params["length"]):
+		var radius: float = params["base_radius"] + sin(step * params["radius_frequency"]) * params["radius_amplitude"]
+		radius = maxf(radius, 1.0)
+		_carve_circle(world_data, pos, radius)
+
+		var drift: float = rng.randf_range(-params["angle_drift_max"], params["angle_drift_max"])
+		angle += drift
+		angle = lerp_angle(angle, PI / 2.0, params["vertical_bias"] * 0.05)
+
+		pos.x += cos(angle) * 1.5
+		pos.y += sin(angle) * 1.5
+
+		if pos.x < 1 or pos.x >= w - 1:
+			break
+		if pos.y < 1 or pos.y >= underground_depth - 1:
+			break
+
+		if branch_depth < MAX_BRANCH_DEPTH and rng.randf() < params["branch_chance"]:
+			var branch_params: Dictionary = params.duplicate()
+			branch_params["length"] = rng.randi_range(
+				int(params["length"] * 0.2),
+				int(params["length"] * 0.5)
+			)
+			branch_params["base_radius"] *= rng.randf_range(0.5, 0.9)
+			branch_params["branch_chance"] *= 0.5
+			_run_worm(world_data, rng, pos, branch_params, branch_depth + 1)
+
+
+func _carve_circle(world_data, center: Vector2, radius: float) -> void:
+	var r_int: int = ceili(radius)
+	var cx: int = int(center.x)
+	var cy: int = int(center.y)
+	var r_sq: float = radius * radius
+
+	for dx in range(-r_int, r_int + 1):
+		for dy in range(-r_int, r_int + 1):
+			if dx * dx + dy * dy <= r_sq:
+				var pos := Vector2i(cx + dx, cy + dy)
+				if pos.y > 0 and pos.x >= 0 and pos.x < world_data.world_width:
+					world_data.tiles.erase(pos)

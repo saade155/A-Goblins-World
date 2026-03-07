@@ -158,8 +158,10 @@ func _on_command_submitted(text: String) -> void:
 			_cmd_list()
 		"clear":
 			_cmd_clear()
+		"reveal":
+			ExplorationTracker.toggle_debug_fog()
 		"help":
-			_append_log("Commands: give <id> [amount] [quality], give_all, list, clear, help")
+			_append_log("Commands: give <id> [amount] [quality], give_all, list, clear, reveal, help")
 		_:
 			_append_log("Unknown command: %s" % cmd)
 
