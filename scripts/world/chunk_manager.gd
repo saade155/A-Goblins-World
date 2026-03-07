@@ -931,22 +931,36 @@ func _evaluate_slope(world_pos: Vector2i) -> int:
 	if not world_data.has_tile(world_pos + Vector2i(0, -1)) and world_data.has_tile(world_pos + Vector2i(0, 1)):
 		# ◢ Floor-right: NE solid, NE's N empty, NW NOT solid (else it's a valley)
 		var ne := world_pos + Vector2i(1, -1)
-		if world_data.has_tile(ne) and not world_data.has_tile(ne + Vector2i(0, -1)) and not world_data.has_tile(world_pos + Vector2i(-1, -1)) and not world_data.has_tile(world_pos + Vector2i(-1, 0)):
+		if world_data.has_tile(ne) and not world_data.has_tile(ne + Vector2i(0, -1)) and not world_data.has_tile(world_pos + Vector2i(-1, -1)) and not world_data.has_tile(world_pos + Vector2i(-1, 0)) and world_data.has_tile(world_pos + Vector2i(1, 0)):
 			return SlopeDir.FLOOR_RIGHT
 		# ◣ Floor-left: NW solid, NW's N empty, NE NOT solid (else it's a valley)
 		var nw := world_pos + Vector2i(-1, -1)
-		if world_data.has_tile(nw) and not world_data.has_tile(nw + Vector2i(0, -1)) and not world_data.has_tile(world_pos + Vector2i(1, -1)) and not world_data.has_tile(world_pos + Vector2i(1, 0)):
+		if world_data.has_tile(nw) and not world_data.has_tile(nw + Vector2i(0, -1)) and not world_data.has_tile(world_pos + Vector2i(1, -1)) and not world_data.has_tile(world_pos + Vector2i(1, 0)) and world_data.has_tile(world_pos + Vector2i(-1, 0)):
+			return SlopeDir.FLOOR_LEFT
+		# Ledge slopes: tile at the top edge of a step
+		# ◢ Floor-right ledge: drop to the left — W empty, SW solid (lower ground), E solid (upper level continues)
+		if not world_data.has_tile(world_pos + Vector2i(-1, 0)) and world_data.has_tile(world_pos + Vector2i(-1, 1)) and world_data.has_tile(world_pos + Vector2i(1, 0)):
+			return SlopeDir.FLOOR_RIGHT
+		# ◣ Floor-left ledge: drop to the right — E empty, SE solid (lower ground), W solid (upper level continues)
+		if not world_data.has_tile(world_pos + Vector2i(1, 0)) and world_data.has_tile(world_pos + Vector2i(1, 1)) and world_data.has_tile(world_pos + Vector2i(-1, 0)):
 			return SlopeDir.FLOOR_LEFT
 
 	# Ceiling slopes: S must be empty, N must be solid (continuous ceiling surface)
 	if not world_data.has_tile(world_pos + Vector2i(0, 1)) and world_data.has_tile(world_pos + Vector2i(0, -1)):
 		# ◥ Ceil-right: SE solid, SE's S empty, SW NOT solid (else it's a notch)
 		var se := world_pos + Vector2i(1, 1)
-		if world_data.has_tile(se) and not world_data.has_tile(se + Vector2i(0, 1)) and not world_data.has_tile(world_pos + Vector2i(-1, 1)) and not world_data.has_tile(world_pos + Vector2i(-1, 0)):
+		if world_data.has_tile(se) and not world_data.has_tile(se + Vector2i(0, 1)) and not world_data.has_tile(world_pos + Vector2i(-1, 1)) and not world_data.has_tile(world_pos + Vector2i(-1, 0)) and world_data.has_tile(world_pos + Vector2i(1, 0)):
 			return SlopeDir.CEIL_RIGHT
 		# ◤ Ceil-left: SW solid, SW's S empty, SE NOT solid (else it's a notch)
 		var sw := world_pos + Vector2i(-1, 1)
-		if world_data.has_tile(sw) and not world_data.has_tile(sw + Vector2i(0, 1)) and not world_data.has_tile(world_pos + Vector2i(1, 1)) and not world_data.has_tile(world_pos + Vector2i(1, 0)):
+		if world_data.has_tile(sw) and not world_data.has_tile(sw + Vector2i(0, 1)) and not world_data.has_tile(world_pos + Vector2i(1, 1)) and not world_data.has_tile(world_pos + Vector2i(1, 0)) and world_data.has_tile(world_pos + Vector2i(-1, 0)):
+			return SlopeDir.CEIL_LEFT
+		# Ceiling ledge slopes: tile at the bottom edge of an overhang
+		# ◥ Ceil-right ledge: indent to the left — W empty, NW solid, E solid
+		if not world_data.has_tile(world_pos + Vector2i(-1, 0)) and world_data.has_tile(world_pos + Vector2i(-1, -1)) and world_data.has_tile(world_pos + Vector2i(1, 0)):
+			return SlopeDir.CEIL_RIGHT
+		# ◤ Ceil-left ledge: indent to the right — E empty, NE solid, W solid
+		if not world_data.has_tile(world_pos + Vector2i(1, 0)) and world_data.has_tile(world_pos + Vector2i(1, -1)) and world_data.has_tile(world_pos + Vector2i(-1, 0)):
 			return SlopeDir.CEIL_LEFT
 
 	return SlopeDir.NONE

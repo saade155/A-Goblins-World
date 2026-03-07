@@ -32,11 +32,17 @@ func _ready() -> void:
 	global_position = _spawn_pos
 	velocity = _initial_velocity
 
-	# Set the sprite color based on item type using TileData colors.
-	var tile_type: int = TileDatabase.get_tile_from_item(item_type)
-	var props: Dictionary = TileDatabase.get_properties(tile_type)
-	if not props.is_empty():
-		_sprite.self_modulate = props.get("color", Color.WHITE)
+	# Use the item's icon texture if available, otherwise fall back to tile color.
+	var icon_path: String = "res://assets/items/%s/icon.png" % item_type
+	if ResourceLoader.exists(icon_path):
+		_sprite.texture = load(icon_path)
+		_sprite.scale = Vector2(0.5, 0.5)
+		_sprite.self_modulate = Color.WHITE
+	else:
+		var tile_type: int = TileDatabase.get_tile_from_item(item_type)
+		var props: Dictionary = TileDatabase.get_properties(tile_type)
+		if not props.is_empty():
+			_sprite.self_modulate = props.get("color", Color.WHITE)
 
 
 func _physics_process(delta: float) -> void:
