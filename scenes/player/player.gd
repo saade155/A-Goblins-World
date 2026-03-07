@@ -199,6 +199,7 @@ func _ready() -> void:
 	# Tighten floor detection: default 45° lets Godot treat wall collisions as "floor".
 	# 20° is plenty for a rectangular tile game where floors are perfectly flat.
 	floor_max_angle = deg_to_rad(46.0)
+	floor_snap_length = 16.0
 
 	# Register with GameState so other systems can find the player.
 	GameState.register_player(self)
