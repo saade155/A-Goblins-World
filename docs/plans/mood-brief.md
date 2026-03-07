@@ -301,7 +301,7 @@ Everything is wrong. The rules you learned don't apply.
 Darkness here is different -- not absence of light but presence of dark. Your torch is dimmer. Light doesn't travel as far. Impossible geometry hints. Passages that feel like they shouldn't connect. Scale that doesn't make sense. The background layers show things that are hard to process -- vast shapes, movement at scale that implies something enormous.
 
 You are not welcome here. The world itself resists you.
-
+ 
 **Palette:** void black, deep purple veins, sickly green accents, your torchlight struggles -- warm but small.
 
 #### Mushroom Realm (accessed from Fungal Grove)

@@ -73,7 +73,7 @@ Tileset mode discovers `tiles.png` and `back_wall.png` by convention (no explici
 - `_bitmask_to_atlas: Dictionary` — 47-entry bitmask → Vector2i(col, row) lookup
 - `_splat_textures: Dictionary` — `{tile_type: [Texture2D, ...]}` loaded splat variants
 - `_splat_surface_textures: Dictionary` — `{tile_type: [Texture2D, ...]}` loaded surface variants
-- `_chunk_splat_sprites: Dictionary` — `{chunk_coord: [Sprite2D, ...]}` for cleanup on unload
+- `_splat_sprites: Dictionary` — `{Vector2i: Sprite2D}` mapping world positions to their splat sprite nodes
 
 **Tileset functions (new):**
 - `_build_bitmask_lookup()` — 47-entry table
@@ -85,16 +85,15 @@ Tileset mode discovers `tiles.png` and `back_wall.png` by convention (no explici
 **Splat functions (new):**
 - `_load_splat_textures()` — loads all splat variant textures at startup
 - `_create_splat_sprite(world_pos, tile_type) -> Sprite2D` — creates 32x32 centered sprite, picks variant by position hash, checks surface vs underground
-- `_remove_splat_sprite(world_pos, chunk_coord)` — removes splat sprite on mine
+- `_remove_splat_sprite(world_pos)` — removes splat sprite on mine
 
 **Modified functions:**
 - `_build_tileset()` — add bitmask lookup + autotile sources + back wall sources
 - `_get_tile_visual(world_pos, tile_type)` — tileset: bitmask lookup. Splat: returns empty (handled separately as Sprite2D). Fallback: colored rect.
-- `_create_chunk_visuals()` — after TileMapLayer population, iterate tiles again for splat types → create Sprite2D nodes. Back wall loop uses separate `_get_back_wall_visual()`.
+- `_populate_all_visuals()` — populates the two global TileMapLayers (foreground + back wall) during loading screen. After setting tilemap cells, iterates tiles again for splat types → creates Sprite2D nodes. Yields every 10,000 tiles for progress bar updates.
 - `_on_tile_mined()` — remove splat sprite if applicable, update neighbors
 - `_on_tile_placed()` — create splat sprite if applicable, update neighbors
 - `_on_back_wall_mined/placed()` — neighbor visual updates for back walls
-- `_unload_chunk()` — clean up splat sprites via `_chunk_splat_sprites`
 
 ## Bitmask
 ```
@@ -123,15 +122,15 @@ N=1, NE=2, E=4, SE=8, S=16, SW=32, W=64, NW=128. Diagonals only if both adjacent
 Note: Cell (10, 1) is empty -- no bitmask value maps to it (47 tiles in 48 cells).
 
 ## Performance
-- Chunk gen: +8 dict lookups per tileset tile + Sprite2D creation per splat tile — negligible
-- Splat sprites: ~5-20 per chunk (ores are sparse) — much fewer than the 1024 tilemap cells
+- Initial load: all tiles populated into two global TileMapLayers during loading screen with async progress. +8 dict lookups per tileset tile + Sprite2D creation per splat tile.
+- Splat sprites: ores are sparse, so total splat Sprite2D count is low relative to total tile count. Godot viewport culling handles off-screen sprites.
 - Mine/place: 9 tiles recalculated + 1 splat sprite created/removed
 - Memory: ~50KB per tileset texture, ~4KB per splat texture
 
 ## Edge Cases
 - **World boundary:** `has_tile()` returns true for out-of-bounds → no edges at world edge
 - **Back wall with no back_wall.png:** Falls back to colored rect with modulate (existing behavior)
-- **Splat at chunk boundary:** 32x32 sprite overflows by 8px into adjacent chunk area — visually fine, sprite lives in originating chunk
+- **Splat overflow:** 32x32 sprite extends 8px beyond its 16x16 cell in each direction — visually fine, Godot handles rendering/culling
 - **Splat tile behind tileset tile:** Won't happen — each world position has exactly one tile type
 - **Water:** Treated as filled in bitmask → no edges against water
 
@@ -143,4 +142,4 @@ Note: Cell (10, 1) is empty -- no bitmask value maps to it (47 tiles in 48 cells
 5. Surface ores use surface variant, underground ores use normal variant
 6. Stone/tiles without art → colored rectangles (unchanged)
 7. Save/load → correct rendering (bitmask + variant selection computed at render time)
-8. Chunk load/unload → splat sprites properly created and cleaned up
+8. World load → all splat sprites created during initial population; mine/place correctly adds/removes them

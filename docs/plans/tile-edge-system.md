@@ -1,3 +1,5 @@
+> **OBSOLETE** — This system was replaced by the 47-tile blob autotile system in Phase 1. See `tile-rendering.md` for the current approach.
+
 # Tile Edge & Overlay System — Design (Revised)
 
 ## Problem

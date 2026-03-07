@@ -1,3 +1,5 @@
+> **OBSOLETE** — Phase 1 rebuilt the world system with 16px tiles. This migration plan was never executed.
+
 # Tile Migration: 16px to 32px
 
 ## Summary

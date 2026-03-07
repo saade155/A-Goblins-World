@@ -552,6 +552,15 @@ func get_back_wall_path(tile_type: int) -> String:
 	return "res://assets/items/%s/back_wall.png" % drop_item
 
 
+## Get the file path for a tile type's slope texture atlas.
+## Returns "" if the tile type has no drop item (and thus no slope art).
+func get_slope_path(tile_type: int) -> String:
+	var drop_item: String = get_drop(tile_type)["item"]
+	if drop_item == "":
+		return ""
+	return "res://assets/items/%s/slopes.png" % drop_item
+
+
 ## Get full paths to splat variant PNGs for a splat-mode tile type.
 func get_splat_variants(tile_type: int) -> Array:
 	_ensure_render_config()

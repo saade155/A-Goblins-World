@@ -3,7 +3,7 @@
 **Engine:** Godot 4.5.1 (GDScript)
 **Solo dev + AI assisted**
 
-Structured as milestones that each produce something playable. M1-M6 plus Phase 1/1.5 are complete. Early milestones (M7-M12) are detailed with Godot specifics. Mid milestones (M13-M16) have moderate detail. Later milestones (M17-M24) are broader because the right decisions depend on what we learn building the foundation.
+Structured as milestones that each produce something playable. M1-M7 plus Phase 1/1.5 are complete. Early milestones (M8-M12) are detailed with Godot specifics. Mid milestones (M13-M16) have moderate detail. Later milestones (M17-M24) are broader because the right decisions depend on what we learn building the foundation.
 
 ---
 
@@ -18,11 +18,13 @@ Every game action flows through an authority. In single-player, the local game I
 - The player controller emits input events; it does not directly modify world state
 - Rendering reads from authoritative state, never writes to it
 
-**Chunk Architecture:**
-The world is finite and bounded, with selectable size presets (Small 2400x800, Medium 3600x1000, Large 4800x1200). Tile data is stored in chunks (dictionaries of tile data, not TileMapLayer nodes). Only chunks near the player get rendered. All chunk data lives in memory for the finite world, so chunk loading is synchronous (no threading needed). World generation happens once at world creation.
+**World Rendering Architecture:**
+The world is finite and bounded, with selectable size presets (Small 2400x800, Medium 3600x1000, Large 4800x1200). Tile data is stored in WorldData (dictionaries of tile data). Two global TileMapLayers (foreground + back wall) render all tiles — no per-chunk nodes. All tiles are loaded at once during a loading screen with progress bar. World generation happens once at world creation via a background thread, then all visuals are populated in a single pass. Darkness overlays remain spatially managed around the player.
+
+*(Updated: Previously used per-chunk TileMapLayers with dynamic load/unload based on player proximity. Refactored to 2 global TileMapLayers with full upfront tile population.)*
 
 **Data vs. Presentation:**
-World state (what tile is at position X,Y) is data in dictionaries. TileMapLayer nodes are presentation. This separation is what makes multiplayer, saving, and chunk streaming possible.
+World state (what tile is at position X,Y) is data in dictionaries (WorldData). Two global TileMapLayer nodes are presentation. This separation is what makes multiplayer, saving, and efficient rendering possible.
 
 **Behavior Tracking System (Foundational):**
 The game watches what the player does from the very first session. This system is not a milestone feature - it is infrastructure that goes in early and feeds everything later:
@@ -55,7 +57,7 @@ scenes/
     player.gd          # Movement controller
   world/
     world.tscn
-    chunk_renderer.gd  # TileMapLayer wrapper (stub)
+    chunk_renderer.gd  # (Updated: Originally a per-chunk TileMapLayer wrapper stub. Now obsolete — replaced by global TileMapLayers managed by chunk_manager.gd acting as a world renderer.)
 scripts/
   autoloads/
     game_server.gd     # Authority for game state (stub)
@@ -140,10 +142,12 @@ Goblin moves fluidly with visible acceleration. Jumping feels snappy. Variable j
 - Items stored in inventory array (no UI yet, just data)
 - GameServer emits `item_collected(item_type, amount)` signal
 
-**World data layer (chunk_data.gd):**
-- `Dictionary` keyed by `Vector2i` chunk coords
+**World data layer (world_data.gd):**
+- `Dictionary` keyed by `Vector2i` tile positions, stored in WorldData
 - Functions: `get_tile(world_pos)`, `set_tile(world_pos, type)`, `remove_tile(world_pos)`
-- TileMapLayer reads from this data, never the other way around
+- Global TileMapLayers read from this data, never the other way around
+
+*(Updated: Originally `chunk_data.gd` keyed by chunk coords. Now `world_data.gd` with global tile storage. TileMapLayer rendering uses 2 global layers instead of per-chunk nodes.)*
 
 **BehaviorTracker (first real tracking):**
 - Listens to `tile_mined`, `tile_placed`, `item_collected` signals
@@ -157,7 +161,7 @@ Dig through dirt and stone. Pick up dropped resources. Place blocks. Carve tunne
 - **Mouse aiming for mining target** - highlight the targeted tile
 - **Authority flow for all tile changes** - even in single-player
 - **TileSet custom data layers** for tile properties (Godot native feature)
-- **Chunk data as plain dictionaries** - fast to serialize for saving and networking
+- **World data as plain dictionaries** - fast to serialize for saving and networking *(Updated: originally "Chunk data")*
 - **Mining progress visual** - overlay sprite with crack frames
 - **Signal-based behavior tracking** - GameServer emits, BehaviorTracker listens, zero coupling
 
@@ -166,19 +170,23 @@ Player can mine a tunnel, blocks drop items, items get picked up, blocks can be 
 
 ---
 
-## Milestone 3: Chunk System and World Generation
+## Milestone 3: World Generation and Rendering
 **Status:** COMPLETE
 
-**Goal:** Procedurally generated world. Chunks load/unload as the player moves. Game starts underground. BehaviorTracker records depth reached.
+**Goal:** Procedurally generated world. All tiles rendered via global TileMapLayers. Game starts underground. BehaviorTracker records depth reached.
+
+*(Updated: Originally designed as a dynamic chunk loading/unloading system with per-chunk TileMapLayers. Refactored to use 2 global TileMapLayers (foreground + back wall) with all tiles loaded at once during a loading screen. chunk_manager.gd now acts as a world renderer rather than a chunk lifecycle manager.)*
 
 ### What Gets Built
 
-**Chunk manager (autoload):**
-- Tracks player position, determines active chunk radius (5x5 around player)
-- Loads entering chunks, unloads leaving chunks
-- One TileMapLayer per active chunk, positioned at world offset
-- Chunk size: 32x32 tiles (512x512 pixels at original 16px tile size)
-- Background thread generation, main thread application via `call_deferred`
+**World renderer (chunk_manager.gd):**
+- Manages 2 global TileMapLayers (foreground + back wall) for all tile rendering
+- All tiles populated at once during loading screen with progress bar
+- World generation runs on a background thread, then visuals are applied in a single pass on the main thread
+- Darkness overlays remain spatially managed around the player position
+- Chunk size 32x32 tiles is still used as an organizational unit for darkness overlays and world generation, but there are no per-chunk TileMapLayer nodes
+
+*(Historical: Originally tracked player position and managed a 5x5 active chunk radius. Each chunk was a separate TileMapLayer node that was created/freed as the player moved. Background thread generation used `call_deferred` to apply chunk data. This dynamic loading was replaced by upfront full-world population.)*
 
 **World generator:**
 - `FastNoiseLite` for base terrain noise
@@ -201,9 +209,11 @@ Player can mine a tunnel, blocks drop items, items get picked up, blocks can be 
 - Chunk at origin uses a special template: small cave room, floor, dead miner's pickaxe, basic supplies
 - Procedural with constraints: guaranteed floor, ceiling, item spawns
 
-**Chunk persistence:**
-- Modified chunks saved to disk (`user://worlds/<name>/chunks/<x>_<y>.dat`)
-- Unmodified chunks regenerated from seed (not saved)
+**World persistence:**
+- Full world tile data saved to `world_cache.dat` and loaded directly on save load
+- No per-chunk save files — entire world state persisted at once via SaveManager
+
+*(Historical: Originally, modified chunks were saved individually to `user://worlds/<name>/chunks/<x>_<y>.dat` and unmodified chunks were regenerated from seed. Replaced by whole-world persistence via world_cache.dat.)*
 
 **Lighting (basic):**
 - Depth-based ambient darkness (CanvasModulate or shader)
@@ -214,8 +224,25 @@ Player can mine a tunnel, blocks drop items, items get picked up, blocks can be 
 - Track movement distance (cumulative)
 - Track ore types encountered (first discovery of each type)
 
-### Chunk Lifecycle
+### World Loading Lifecycle
 ```
+New world:
+  -> World generation runs on background thread (all tiles at once)
+  -> Loading screen displays progress bar
+  -> All tiles populated into 2 global TileMapLayers (foreground + back wall)
+  -> Full light computation runs
+  -> World is ready
+
+Loading saved world:
+  -> world_cache.dat loaded directly into WorldData
+  -> All tiles populated into 2 global TileMapLayers
+  -> Light maps restored
+  -> World is ready
+```
+
+*(Historical: The original chunk lifecycle diagram below is obsolete but preserved for reference:)*
+```
+[OBSOLETE] Original per-chunk lifecycle:
 Player moves near unloaded chunk
   -> Saved file exists? Load from disk : Generate from seed (background thread)
   -> Create TileMapLayer, apply tile data (main thread)
@@ -231,13 +258,13 @@ Player moves away from chunk
 Start in spawn cave. Mine outward into procedural cave systems. Go deeper to find different materials. Place torches. World feels vast. Performance stays solid.
 
 ### Key Technical Decisions
-- **Chunk size 32x32** - fast generation, manageable count
-- **One TileMapLayer per chunk** - natural physics boundaries
-- **FastNoiseLite over cellular automata** - deterministic per-coordinate, chunks generate independently
-- **Background thread generation** - prevents frame drops
-- **Dirty chunk tracking** - only modified chunks saved
+- **Chunk size 32x32** - used as an organizational unit for world generation and darkness overlays
+- **2 global TileMapLayers** - one for foreground tiles, one for back walls. No per-chunk nodes. *(Updated: originally one TileMapLayer per chunk for natural physics boundaries)*
+- **FastNoiseLite over cellular automata** - deterministic per-coordinate, tiles generate independently
+- **Background thread for world generation** - world gen runs on a thread, then all visuals populated at once during loading screen
+- **Full world persistence via world_cache.dat** - entire world saved/loaded at once *(Updated: originally used dirty chunk tracking where only modified chunks were saved)*
 - **Y-axis goes down** - deeper = higher Y values in Godot 2D
-- **BehaviorTracker serialized with save data** - chunk persistence and behavior data save/load together
+- **BehaviorTracker serialized with save data** - world persistence and behavior data save/load together
 
 ### Acceptance Test
 World generates seamlessly in any direction. No pop-in, no frame drops. Modified terrain persists after leaving/returning. Depth zones are visually distinct. Spawn chamber always generates correctly. `BehaviorTracker.get_stat("max_depth_reached")` updates correctly as player descends.
@@ -385,7 +412,7 @@ Mining stone gives Mining XP. Mining dirt at Mining level 20+ gives almost no XP
 
 ### What Gets Built
 
-- **16px tiles** (rebuilt from 32px): All tile rendering and collision updated. Chunk size remains 32x32 tiles but each tile is now 16x16 pixels
+- **16px tiles** (rebuilt from 32px): All tile rendering and collision updated. 32x32 tile chunks remain as an organizational unit for darkness overlays, but tiles are rendered via 2 global TileMapLayers rather than per-chunk nodes
 - **Finite bounded worlds** with selectable size presets:
   - Small: 2400x800 tiles
   - Medium: 3600x1000 tiles
@@ -395,11 +422,11 @@ Mining stone gives Mining XP. Mining dirt at Mining level 20+ gives almost no XP
 - **BFS fog of war:** Flood-fill exploration through empty space. Surface daylight expansion reveals tiles near the surface. Fog persists via SaveManager. World-owned (any player reveals for all)
 - **Spawn chamber:** 24x14 tiles at world center. Guaranteed safe starting area
 - **Colored rectangle rendering:** Biome color palettes drive tile appearance instead of sprite-based tiles. The M4.6 edge/overlay system was stripped entirely
-- **Synchronous chunk loading:** Since all tile data lives in memory for finite worlds, chunk loading is synchronous — no threading overhead needed
+- **Full upfront tile loading:** All tiles loaded at once during a loading screen with progress bar. 2 global TileMapLayers (foreground + back wall) — no per-chunk nodes or dynamic loading
 
 ### Key Technical Decisions
 - **Finite over infinite** — bounded worlds enable full-world operations (fog of war, lighting) without streaming complexity
-- **All data in memory** — eliminates chunk save/load during gameplay; world_cache.dat handles persistence
+- **All data in memory** — eliminates per-chunk save/load during gameplay; world_cache.dat handles full-world persistence. 2 global TileMapLayers render all tiles upfront
 - **16px tiles** — doubles visual detail density at same viewport size, better for the art style
 - **Fog of war as world-owned** — globally shared exploration state, not per-player
 - **Strip edge/overlay system** — colored rectangles are fast and sufficient until proper tile art is ready
@@ -525,7 +552,7 @@ Player can open inventory, drag items between slots, split and merge stacks. Equ
 - **Item transfer validation:** GameServer validates all transfers (no duplication exploits)
 - **Container persistence:**
   - Container contents stored in world save data (world-owned, not player-owned)
-  - Containers tied to world position — survive chunk unload/reload
+  - Containers tied to world position — persist in WorldData alongside tile data
   - Container metadata in world_data alongside tile data
 - **Multiple container types (stretch):** Small chest, large chest, locked chest
 
@@ -550,7 +577,7 @@ Player can craft a chest, place it, open it, transfer items in and out. Containe
   - Water as a separate data layer (like back walls) with fill levels per tile
   - Flow mechanics: water spreads horizontally and falls with gravity
   - Source blocks that generate water (underground springs, surface lakes)
-  - Cellular automaton update — processed per chunk on a tick timer, not per frame
+  - Cellular automaton update — processed in regions on a tick timer, not per frame
 - **Water rendering:**
   - Semi-transparent blue overlay on tiles containing water
   - Fill level affects visual height within a tile
@@ -570,7 +597,7 @@ Player can craft a chest, place it, open it, transfer items in and out. Containe
 - **Fill levels per tile (0-8)** — allows partial fills and realistic flow, not just binary wet/dry
 - **Tick-based simulation** — water updates on a timer (e.g., 10 ticks/sec), not every physics frame
 - **Separate data layer** — water data stored alongside tile data in world_cache.dat
-- **Chunk-boundary flow** — water simulation checks neighboring chunks for cross-boundary flow
+- **Seamless flow** — water simulation operates on the global WorldData, no boundary concerns *(Updated: originally needed cross-chunk boundary checks when using per-chunk TileMapLayers)*
 
 ### Acceptance Test
 Water flows downward and spreads horizontally realistically. Breaking into a water pocket floods the tunnel. Player can swim with reduced speed. Breath meter depletes underwater. Water persists through save/load. No performance issues with large water bodies.
@@ -605,7 +632,7 @@ Water flows downward and spreads horizontally realistically. Breaking into a wat
 
 ### Key Technical Decisions
 - **One active map at a time** — simplifies memory and rendering; multiplayer can revisit this later
-- **Maps as independent world_data instances** — reuses all existing chunk/tile/light infrastructure
+- **Maps as independent world_data instances** — reuses all existing tile/light/rendering infrastructure
 - **Transition as scene swap** — current world scene freed, new one instantiated, player transferred
 - **Map registry** — central registry of map IDs, types, and entry points stored in world save
 
@@ -739,10 +766,12 @@ Player can equip weapons, attack the cave bat, dodge its swoop, kill it for loot
 ### What Gets Built
 
 **Spawning system:**
-- Chunk-based spawn evaluation: each active chunk has a spawn budget based on depth
-- Max enemies per chunk, minimum distance from player for spawning
+- Region-based spawn evaluation: spawn budget based on depth zone around the player
+- Max enemies per region, minimum distance from player for spawning
 - Spawn tables per depth zone (weighted random from enemy pool)
-- Enemies despawn when their chunk unloads
+- Enemies despawn when far enough from the player
+
+*(Updated: Originally described as chunk-based spawning where enemies despawned on chunk unload. Since chunks are no longer dynamically loaded/unloaded, spawning uses proximity-based regions instead.)*
 
 **3-5 enemy types, each with unique behavior:**
 - **Cave Bat** (from M12, refined): Flies, swoops, low HP, fast - shallow caves
@@ -776,7 +805,7 @@ Encounter diverse enemies while exploring. Learn attack patterns. Fight through 
 
 ### Key Technical Decisions
 - **State machine per enemy type** - shared base class with overrides
-- **Chunk-based spawning** - natural population control, tied to world streaming
+- **Region-based spawning** - natural population control, tied to player proximity *(Updated: originally chunk-based, tied to world streaming)*
 - **Difficulty_level per depth variant** - plugs directly into skill XP soft cap
 - **Loot tables as data** - JSON/Resource files, easy to tune
 
@@ -1057,7 +1086,7 @@ Discover that they're not alone. Trade excess resources for unique items. Seek o
 
 - **Networking:** `ENetMultiplayerPeer` (LAN), potentially Steam networking
 - **Player replication:** `MultiplayerSpawner` + `MultiplayerSynchronizer`
-- **State sync:** World changes as RPCs, chunk streaming from server to clients
+- **State sync:** World changes as RPCs, world data sync from server to clients *(Updated: originally "chunk streaming" when using dynamic chunk loading)*
 - **Host-as-server model:** One player hosts, others join
 - **Skill/class/behavior per player:** Each player has independent BehaviorTracker, SkillSystem, and class data
 
@@ -1085,8 +1114,8 @@ This is why we built client-server from day one. GameServer becomes the network 
 
 | Risk | Mitigation |
 |------|------------|
-| Chunk border seams | Overlap by 1 tile, 34x34 darkness images with region_rect |
-| Performance with many chunks | Finite world with all data in memory, synchronous loading |
+| Darkness overlay seams | 34x34 darkness images with region_rect for seamless boundaries *(Updated: originally "Chunk border seams" when using per-chunk TileMapLayers)* |
+| Performance with large worlds | Finite world with all data in memory, 2 global TileMapLayers, full upfront loading with progress bar *(Updated: originally "Performance with many chunks")* |
 | Boring world generation | Multiple noise layers, structures, POIs, constant playtesting |
 | Floaty combat | Nail movement in M1 first. Frame-precise hitboxes. Playtest constantly. |
 | Multiplayer retrofit pain | Client-server architecture from M1 prevents this |
@@ -1101,4 +1130,4 @@ This is why we built client-server from day one. GameServer becomes the network 
 
 ## Start Here
 
-**Milestones 1-6 plus Phase 1/1.5 are complete.** Next up is M7 (Inventory UI & Equipment System), building on the inventory data layer from M4A.
+**Milestones 1-7 plus Phase 1/1.5 are complete.** Next up is M8 (Containers), building on the inventory and equipment systems from M7.

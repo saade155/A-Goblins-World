@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://8uxcumldh5kt"
-path="res://.godot/imported/dirt_tiles32.png-7ce8cd329c3ece49a8aa03f7c82ac199.ctex"
+uid="uid://b208i8nd8htsm"
+path="res://.godot/imported/slopes.png-96af5a80d20e84cc27cd50dd2658ad7e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/tilesets/dirt_tiles32.png"
-dest_files=["res://.godot/imported/dirt_tiles32.png-7ce8cd329c3ece49a8aa03f7c82ac199.ctex"]
+source_file="res://assets/items/dirt/slopes.png"
+dest_files=["res://.godot/imported/slopes.png-96af5a80d20e84cc27cd50dd2658ad7e.ctex"]
 
 [params]
 

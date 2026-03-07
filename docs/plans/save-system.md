@@ -41,11 +41,12 @@ user://worlds/<world_name>/
 ## Operations
 
 ### During Play
-- Chunks write to `current/` as they do now (on chunk unload, window close)
-- This is the live working state, same as current behavior
+- For finite worlds, the primary persistence mechanism is `world_cache.dat` (full tile data for the entire world)
+- Dirty chunks are still written to `current/chunks/` for backward compatibility
+- `_save_dirty_chunks()` iterates `world_data.dirty_chunks` (not `active_chunks`)
 
 ### On Save (Manual or Auto)
-1. Flush all dirty chunks to `current/`
+1. Flush all dirty chunks to `current/` and write `world_cache.dat`
 2. Copy `current/` → `saves/<name>/` **on a background thread** to avoid frame drops
 3. Write `meta.dat` with timestamp, trigger reason, playtime, player position
 4. For autosave: if at rolling limit, delete oldest auto save before creating new one
@@ -55,7 +56,8 @@ user://worlds/<world_name>/
 1. Show loading screen
 2. Copy `saves/<name>/` → `current/`
 3. Reload the game scene (same as current load flow)
-4. ChunkManager reads from `current/` as usual
+4. For finite worlds: `world_cache.dat` is loaded directly into WorldData, all tiles rendered at once
+5. Dirty chunk files in `current/chunks/` are kept for backward compatibility but the cache is the primary source
 
 ### Backward Compatibility
 - Existing v4 saves (flat structure) need migration on first load
@@ -78,10 +80,9 @@ user://worlds/<world_name>/
 - **M4.7 scope:** Timer-based autosave only. Event triggers (boss kills, artifact discoveries, biome milestones) will be wired up when those systems exist.
 
 ## Disk Budget
-- ~2-4KB per dirty chunk
-- ~200 dirty chunks in a well-explored world = ~600KB per save
-- 5 autosaves + 20 manual saves = ~15MB per world
-- Completely reasonable for modern systems
+- `world_cache.dat` stores full tile data for the entire finite world (primary persistence)
+- Dirty chunk files in `current/chunks/` are ~2-4KB each (kept for backward compatibility)
+- 5 autosaves + 20 manual saves remains reasonable for modern systems
 
 ## Future Enhancements
 - **Screenshot thumbnails:** Capture a viewport screenshot on save and store it alongside the snapshot (e.g., `thumbnail.png`). Display in the restore points browser for quick visual identification of save states.

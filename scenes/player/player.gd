@@ -53,6 +53,9 @@ extends CharacterBody2D
 ## Maximum horizontal pixels to nudge when clipping a corner during jump/fall.
 @export var CORNER_CORRECTION: float = 6.0
 
+## Maximum step height in pixels the player can auto-step up while walking.
+@export var STEP_HEIGHT: float = 16.0
+
 # --- Internal state ---
 
 ## Time since the player last stood on the floor (for coyote time).
@@ -195,7 +198,7 @@ var _replaced_by_slot: Dictionary = {}
 func _ready() -> void:
 	# Tighten floor detection: default 45° lets Godot treat wall collisions as "floor".
 	# 20° is plenty for a rectangular tile game where floors are perfectly flat.
-	floor_max_angle = deg_to_rad(20.0)
+	floor_max_angle = deg_to_rad(46.0)
 
 	# Register with GameState so other systems can find the player.
 	GameState.register_player(self)
@@ -249,6 +252,7 @@ func _physics_process(delta: float) -> void:
 		_apply_variable_jump_gravity(delta)
 
 	move_and_slide()
+	_apply_auto_step()
 	_apply_corner_correction()
 
 	# Snap sprite visuals to nearest whole pixel to prevent sub-pixel shimmering.
@@ -260,11 +264,11 @@ func _physics_process(delta: float) -> void:
 	$SpriteStack.position = -frac
 
 	# Manual camera smoothing with pixel snap.
-	# Built-in smoothing causes sub-pixel positions that blur everything.
-	var cam_target := global_position
+	# X follows tightly, Y uses a slower lerp to smooth out auto-step jumps.
 	var cam_current := _camera.global_position
-	var cam_smoothed := cam_current.lerp(cam_target, 1.0 - exp(-CAMERA_SMOOTH_SPEED * delta))
-	_camera.global_position = Vector2(roundf(cam_smoothed.x), roundf(cam_smoothed.y))
+	var cam_x := lerpf(cam_current.x, global_position.x, 1.0 - exp(-CAMERA_SMOOTH_SPEED * delta))
+	var cam_y := lerpf(cam_current.y, global_position.y, 1.0 - exp(-6.0 * delta))
+	_camera.global_position = Vector2(roundf(cam_x), roundf(cam_y))
 
 	# Track floor state for next frame's coyote time calculation.
 	_was_on_floor = is_on_floor()
@@ -431,6 +435,52 @@ func _apply_corner_correction() -> void:
 						global_position.x += nudge_dir * nudge_px
 						velocity.y = velocity.y  # Preserve upward momentum
 						return
+
+
+
+## Auto-step: when walking into a low ledge, smoothly step up instead of stopping.
+## Tries moving up by STEP_HEIGHT, then forward, then snapping back down to the floor.
+func _apply_auto_step() -> void:
+	# Only step when on the floor, pressing a direction, and blocked by a wall.
+	if not is_on_floor() or not is_on_wall():
+		return
+	var move_dir: float = InputManager.get_movement_direction()
+	if move_dir == 0.0:
+		return
+
+	var target_speed: float = RUN_SPEED if InputManager.is_sprint_pressed() else SPEED
+	var h_motion := Vector2(move_dir * target_speed * get_physics_process_delta_time(), 0.0)
+	var saved_pos := global_position
+
+	# Step 1: Try moving up by STEP_HEIGHT.
+	var up_motion := Vector2(0.0, -STEP_HEIGHT)
+	var _up_result := move_and_collide(up_motion, false, 0.001)
+	var actual_up: float = global_position.y - saved_pos.y  # Negative = moved up.
+
+	if actual_up >= -1.0:
+		# Couldn't move up at all — ceiling is too close.
+		global_position = saved_pos
+		return
+
+	# Step 2: Try moving forward at the elevated position.
+	var forward_result := move_and_collide(h_motion, false, 0.001)
+	if forward_result != null and forward_result.get_remainder().length() > 0.1:
+		# Still blocked at the elevated position — step is too tall or wall continues.
+		global_position = saved_pos
+		return
+
+	# Step 3: Snap back down to the floor.
+	var down_motion := Vector2(0.0, -actual_up + 4.0)  # A bit extra to find the floor.
+	move_and_collide(down_motion, false, 0.001)
+
+	# Verify we landed on a floor, not floating in the air.
+	if not is_on_floor():
+		# Test if there's ground just below.
+		var ground_test := move_and_collide(Vector2(0.0, 2.0), true, 0.001)
+		if ground_test == null:
+			# No ground — revert.
+			global_position = saved_pos
+			return
 
 
 
