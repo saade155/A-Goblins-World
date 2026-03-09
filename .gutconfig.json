@@ -1,0 +1,8 @@
+{
+  "dirs": ["res://tests/world/"],
+  "prefix": "test_",
+  "suffix": ".gd",
+  "should_maximize": false,
+  "compact_mode": false,
+  "log_level": 1
+}

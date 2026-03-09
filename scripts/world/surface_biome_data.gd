@@ -46,5 +46,27 @@ var subsurface_depth: int = 5
 ## Whether this biome can have water (lakes/ponds) when below sea level.
 var allows_water: bool = true
 
+## How many tiles of water above the surface. 0 = use default SEA_LEVEL logic.
+## When > 0, water fills from surface_h upward for this many tiles.
+var water_depth: int = 0
+
 ## Tree/vegetation density (0.0 to 1.0). Future use.
 var vegetation_density: float = 0.0
+
+## Paired underground biome that appears directly below this surface biome.
+var paired_underground_biome: StringName = &""
+
+## How deep (in tiles) the paired underground biome is forced below the subsurface.
+var continuity_depth: int = 40
+
+## Minimum zone width as percentage of world width (0.0 to 1.0).
+var min_width_pct: float = 0.08
+
+## Maximum zone width as percentage of world width (0.0 to 1.0).
+var max_width_pct: float = 0.20
+
+## Width in tile columns for horizontal blending at zone boundaries.
+var transition_width: int = 12
+
+## Transition style at boundaries. 0=linear blend. Future: 1=tendrils, 2=trickle, etc.
+var transition_style: int = 0

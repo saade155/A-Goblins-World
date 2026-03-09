@@ -8,6 +8,9 @@
 
 extends Node
 
+## Emitted when debug fog is toggled via console or hotkey.
+signal debug_fog_toggled
+
 ## Explored tiles stored as a set (Dictionary[Vector2i, bool]).
 ## Permanent — once explored, always explored. Used for fog of war.
 var explored_tiles: Dictionary = {}
@@ -160,3 +163,4 @@ func toggle_debug_fog() -> void:
 		print("[ExplorationTracker] Debug fog: OFF (all visible)")
 	else:
 		print("[ExplorationTracker] Debug fog: ON")
+	debug_fog_toggled.emit()

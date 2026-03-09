@@ -211,6 +211,7 @@ func _ready() -> void:
 	if ws >= 0:
 		world_data.set_world_size(ws)
 		print("[ChunkManager] Finite world configured: %dx%d tiles (size preset %d)" % [world_data.world_width, world_data.world_height, ws])
+		_create_world_borders()
 
 	# Build the shared tileset (programmatic atlas with all tile types)
 	shared_tileset = _build_tileset()
@@ -223,8 +224,9 @@ func _ready() -> void:
 	GameState.world_data = world_data
 	GameState.world_generator = world_generator
 
-	# Place the spawn chamber as structure tiles
-	_place_spawn_chamber()
+	# NOTE: Spawn chamber placement is deferred to after world generation completes
+	# (see _process generation_complete block). The surface layout needed for spawn_x
+	# is built during generate_world() on the background thread.
 
 	# Connect to GameServer signals for visual updates
 	GameServer.tile_mined.connect(_on_tile_mined)
@@ -313,6 +315,47 @@ func _create_global_tilemaps() -> void:
 	add_child(_back_wall_tilemap)
 
 
+## Create 4 invisible StaticBody2D walls at the world edges to prevent the player
+## from leaving the finite world bounds.
+func _create_world_borders() -> void:
+	if world_data.world_width <= 0:
+		return
+
+	var w_px: float = world_data.world_width * TILE_SIZE
+	var sr: int = world_data.surface_rows
+	var h_tiles: int = world_data.world_height
+	var top_px: float = -sr * TILE_SIZE
+	var bottom_px: float = (h_tiles - sr) * TILE_SIZE
+	var h_px: float = bottom_px - top_px  # full height in pixels
+	var center_y: float = (top_px + bottom_px) / 2.0
+	var thickness: float = 16.0
+
+	# Helper to create one wall
+	var _make_wall := func(wall_name: String, pos: Vector2, size: Vector2) -> void:
+		var body := StaticBody2D.new()
+		body.name = wall_name
+		body.position = pos
+		body.collision_layer = 1
+		body.collision_mask = 0
+		var shape := CollisionShape2D.new()
+		var rect := RectangleShape2D.new()
+		rect.size = size
+		shape.shape = rect
+		body.add_child(shape)
+		add_child(body)
+
+	# Left wall
+	_make_wall.call("BorderLeft", Vector2(-thickness / 2.0, center_y), Vector2(thickness, h_px + thickness))
+	# Right wall
+	_make_wall.call("BorderRight", Vector2(w_px + thickness / 2.0, center_y), Vector2(thickness, h_px + thickness))
+	# Top wall
+	_make_wall.call("BorderTop", Vector2(w_px / 2.0, top_px - thickness / 2.0), Vector2(w_px + thickness, thickness))
+	# Bottom wall
+	_make_wall.call("BorderBottom", Vector2(w_px / 2.0, bottom_px + thickness / 2.0), Vector2(w_px + thickness, thickness))
+
+	print("[ChunkManager] World border walls created.")
+
+
 func _start_world_generation(is_loading_save: bool = false) -> void:
 	## Kick off background thread to pre-generate all tiles for a finite world.
 	## The loading overlay shows progress; _process() polls for completion.
@@ -326,7 +369,8 @@ func _start_world_generation(is_loading_save: bool = false) -> void:
 		_loading_overlay.set_progress_text(label)
 
 	_world_gen_thread = Thread.new()
-	_world_gen_thread.start(world_generator.generate_world.bind(world_data))
+	var world_def := WorldDefinition.create_overworld()
+	_world_gen_thread.start(world_generator.generate_world.bind(world_data, world_def))
 	print("[ChunkManager] Finite world generation started on background thread.")
 
 
@@ -343,8 +387,15 @@ func _process(_delta: float) -> void:
 			if _world_gen_thread:
 				_world_gen_thread.wait_to_finish()
 				_world_gen_thread = null
+			# Place spawn chamber now that surface layout is available
+			_place_spawn_chamber()
 			# Apply structure overrides (spawn chamber)
 			_apply_all_structure_tiles()
+			# For new worlds, update player position using layout.spawn_x
+			if not _is_loading_save and world_data.world_width > 0:
+				var layout = world_generator.get_surface_layout()
+				if layout != null:
+					GameState.saved_player_position = Vector2(layout.spawn_x * TILE_SIZE, GameState.start_depth * TILE_SIZE)
 			# For existing saves without cache, load saved chunk modifications
 			if _is_loading_save:
 				_apply_saved_chunk_modifications()
@@ -461,6 +512,11 @@ func _populate_all_visuals() -> void:
 	_populating = false
 	initial_load_complete.emit()
 
+	# Save full session state after initial load. Without this, a newly generated
+	# world only has its world cache on disk — fog, player position, behavior, and
+	# skills would be lost if the player closes before the first autosave.
+	save_all()
+
 
 ## Apply structure tile overrides directly to world_data.
 ## Called after world generation for new worlds.
@@ -546,8 +602,12 @@ func _place_spawn_chamber() -> void:
 	var spawn_y: int = GameState.start_depth - 5  # Chamber wraps around player
 	var spawn_x: int = -8  # Default for legacy infinite worlds
 	if world_data.world_width > 0:
-		@warning_ignore("integer_division")
-		spawn_x = world_data.world_width / 2 - 8  # Center in finite world
+		var layout = world_generator.get_surface_layout()
+		if layout != null:
+			spawn_x = layout.spawn_x - 8
+		else:
+			@warning_ignore("integer_division")
+			spawn_x = world_data.world_width / 2 - 8
 	var spawn_pos := Vector2i(spawn_x, spawn_y)
 	var tiles: Dictionary = spawn_data["tiles"]
 

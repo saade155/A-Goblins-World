@@ -75,10 +75,18 @@ func _ready() -> void:
 	# Mark dirty when tiles change
 	GameServer.tile_mined.connect(_on_world_changed)
 	GameServer.tile_placed.connect(_on_world_changed)
+	ExplorationTracker.debug_fog_toggled.connect(_on_fog_toggled)
 
 
 func _on_world_changed(_a = null, _b = null, _c = null) -> void:
 	_map_dirty = true
+
+
+func _on_fog_toggled() -> void:
+	_map_dirty = true
+	if is_open:
+		_render_full_image()
+		_center_on_player()
 
 
 func _input(event: InputEvent) -> void:
@@ -105,13 +113,9 @@ func _process(_delta: float) -> void:
 		else:
 			_is_dragging = false
 
-	# Toggle fog
+	# Toggle fog (hotkey — signal handler _on_fog_toggled covers re-render)
 	if not DebugConsole.console_open and InputManager.is_debug_fog_toggle_just_pressed():
 		ExplorationTracker.toggle_debug_fog()
-		_map_dirty = true
-		if is_open:
-			_render_full_image()
-			_center_on_player()
 
 	# Update player marker position while open
 	if is_open:

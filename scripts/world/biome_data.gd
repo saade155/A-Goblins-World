@@ -44,6 +44,11 @@ var cave_density_modifier: float = 1.0
 ## Cave noise threshold override. -1.0 means use the default (-0.75).
 var cave_threshold_override: float = -1.0
 
+## Biome-specific cave threshold for the new blended cave system.
+## Lower = more caves (more open), Higher = fewer caves (denser).
+## 0.3 = very open (swamp), 0.6 = dense (volcanic), 0.45 = baseline.
+var cave_threshold: float = 0.45
+
 ## Ore rules for this biome. Each entry:
 ## { "tile_type": int, "noise_index": int, "threshold": float, "min_depth": int }
 var ore_rules: Array[Dictionary] = []

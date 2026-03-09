@@ -20,9 +20,9 @@ const CHUNK_SIZE: int = 32
 enum WorldSize { SMALL, MEDIUM, LARGE }
 
 const WORLD_SIZE_PRESETS: Dictionary = {
-	WorldSize.SMALL: { "width": 2400, "height": 800, "surface_rows": 100 },
-	WorldSize.MEDIUM: { "width": 3600, "height": 1000, "surface_rows": 100 },
-	WorldSize.LARGE: { "width": 4800, "height": 1200, "surface_rows": 100 },
+	WorldSize.SMALL: { "width": 2400, "height": 1000, "surface_rows": 250 },
+	WorldSize.MEDIUM: { "width": 3600, "height": 1200, "surface_rows": 300 },
+	WorldSize.LARGE: { "width": 4800, "height": 1500, "surface_rows": 350 },
 }
 
 ## World size in tiles. Set at creation, immutable after.

@@ -60,6 +60,7 @@ func _register_all_biomes() -> void:
 		0, 120, 0.45, 0.58, 0,
 		TileDatabase.TileType.SAND, TileDatabase.TileType.SANDSTONE, 0.35)
 	sandy.cave_density_modifier = 0.85
+	sandy.cave_threshold = 0.40
 	sandy.ore_rules = [
 		{"tile_type": TileDatabase.TileType.IRON_ORE, "noise_index": 0, "threshold": 0.55, "min_depth": 10},
 		{"tile_type": TileDatabase.TileType.COPPER_ORE, "noise_index": 1, "threshold": 0.65, "min_depth": 30},
@@ -71,6 +72,7 @@ func _register_all_biomes() -> void:
 		20, 160, 0.58, 0.68, 0,
 		TileDatabase.TileType.MUD, TileDatabase.TileType.MOSSY_STONE, 0.4)
 	swamp.cave_density_modifier = 0.75
+	swamp.cave_threshold = 0.30
 	swamp.ore_rules = [
 		{"tile_type": TileDatabase.TileType.IRON_ORE, "noise_index": 0, "threshold": 0.55, "min_depth": 20},
 		{"tile_type": TileDatabase.TileType.COPPER_ORE, "noise_index": 1, "threshold": 0.6, "min_depth": 30},
@@ -82,6 +84,7 @@ func _register_all_biomes() -> void:
 		60, 250, 0.68, 0.78, 0,
 		TileDatabase.TileType.MYCELIUM, TileDatabase.TileType.MOSSY_STONE, 0.3)
 	fungal.cave_density_modifier = 0.7
+	fungal.cave_threshold = 0.28
 	fungal.ore_rules = [
 		{"tile_type": TileDatabase.TileType.EMERALD_ORE, "noise_index": 5, "threshold": 0.7, "min_depth": 80},
 		{"tile_type": TileDatabase.TileType.COPPER_ORE, "noise_index": 1, "threshold": 0.6, "min_depth": 60},
@@ -94,6 +97,7 @@ func _register_all_biomes() -> void:
 		80, 300, 0.78, 0.87, 0,
 		TileDatabase.TileType.ICE, TileDatabase.TileType.FROZEN_STONE, 0.35)
 	frozen.cave_density_modifier = 1.15
+	frozen.cave_threshold = 0.42
 	frozen.temp_max = -0.2
 	frozen.ore_rules = [
 		{"tile_type": TileDatabase.TileType.IRON_ORE, "noise_index": 0, "threshold": 0.55, "min_depth": 80},
@@ -108,6 +112,7 @@ func _register_all_biomes() -> void:
 		200, 999, 0.45, 0.75, 1,
 		TileDatabase.TileType.VOLCANIC_ROCK, TileDatabase.TileType.OBSIDIAN, 0.2)
 	volcanic.cave_density_modifier = 1.3
+	volcanic.cave_threshold = 0.60
 	volcanic.ore_rules = [
 		{"tile_type": TileDatabase.TileType.RUBY_ORE, "noise_index": 4, "threshold": 0.7, "min_depth": 220},
 		{"tile_type": TileDatabase.TileType.GOLD_ORE, "noise_index": 2, "threshold": 0.65, "min_depth": 200},
@@ -123,6 +128,7 @@ func _register_all_biomes() -> void:
 		250, 999, 0.75, 0.95, 0,
 		TileDatabase.TileType.HARD_STONE, TileDatabase.TileType.CRYSTAL, 0.4)
 	crystal.cave_density_modifier = 1.1
+	crystal.cave_threshold = 0.50
 	crystal.ore_rules = [
 		{"tile_type": TileDatabase.TileType.CRYSTAL, "noise_index": 3, "threshold": 0.6, "min_depth": 250},
 		{"tile_type": TileDatabase.TileType.GOLD_ORE, "noise_index": 2, "threshold": 0.7, "min_depth": 250},
