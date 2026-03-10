@@ -840,10 +840,16 @@ func _generate_biome_regions(world_width: int, world_height: int, surface_rows: 
 			var warped_x: float = world_x + warp_x
 			var warped_y: float = world_y + warp_y
 
+			# Depth fraction for this macro cell (0 = surface, 1 = world bottom)
+			var depth_frac: float = world_y / float(underground_depth)
+
 			# Find nearest seed (anisotropic: Y scaled for tall blobs)
 			var nearest_id: StringName = &"standard_caverns"
 			var nearest_dist: float = INF
 			for seed_data in _biome_seeds:
+				# Swamp/fungal biomes cannot claim territory below 75% depth
+				if depth_frac > 0.75 and (seed_data.id == &"swamp_depths" or seed_data.id == &"fungal_grove"):
+					continue
 				var dx: float = warped_x - seed_data.pos.x
 				var dy: float = (warped_y - seed_data.pos.y) * 2.0  # Stretch Y = tall blobs
 				var dist_sq: float = dx * dx + dy * dy
