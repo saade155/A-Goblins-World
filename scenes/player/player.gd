@@ -235,12 +235,12 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if not DebugConsole.console_open:
+	if not ChatWindow.chat_focused:
 		_check_fly_toggle()
 
 	if debug_fly:
 		_handle_fly_movement()
-	elif GameServer.inventory_open or DebugConsole.console_open:
+	elif GameServer.inventory_open or ChatWindow.chat_focused:
 		# Inventory/console open: still apply gravity and decelerate, but skip player input.
 		_apply_gravity(delta)
 		velocity.x = move_toward(velocity.x, 0.0, FRICTION * delta)

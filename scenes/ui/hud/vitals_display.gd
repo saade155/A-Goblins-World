@@ -1,4 +1,4 @@
-## VitalsDisplay - HP, MP, and Stamina bars in the bottom left.
+## VitalsDisplay - HP, MP, and Stamina bars in the top left.
 
 extends Control
 
@@ -57,8 +57,7 @@ func _ready() -> void:
 
 
 func reposition() -> void:
-	var vp_size: Vector2 = get_viewport().get_visible_rect().size
-	var bar_start_y: int = int(vp_size.y) - BAR_BOTTOM_OFFSET
+	var bar_start_y: int = 12
 
 	# HP bar — 14px tall
 	var hp_pos := Vector2(BAR_X, bar_start_y)

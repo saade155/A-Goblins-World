@@ -341,7 +341,7 @@ func _input(event: InputEvent) -> void:
 	if get_tree().paused:
 		return
 	# Don't toggle inventory while the debug console is open (user is typing).
-	if DebugConsole.console_open:
+	if ChatWindow.chat_focused:
 		return
 	if event.is_action_pressed("toggle_inventory"):
 		_toggle()

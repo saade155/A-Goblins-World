@@ -124,11 +124,6 @@ func is_debug_fog_toggle_just_pressed() -> bool:
 	return Input.is_action_just_pressed("toggle_debug_fog")
 
 
-## Returns true only on the frame the place torch key was pressed.
-func is_place_torch_just_pressed() -> bool:
-	return Input.is_action_just_pressed("place_torch")
-
-
 ## Returns true only on the frame the inventory toggle key was pressed.
 func is_inventory_toggle_just_pressed() -> bool:
 	return Input.is_action_just_pressed("toggle_inventory")

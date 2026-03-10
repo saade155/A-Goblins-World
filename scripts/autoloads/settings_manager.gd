@@ -46,7 +46,6 @@ const REMAPPABLE_ACTIONS: Array[Dictionary] = [
 	{"action": "move_right", "display": "Move Right", "group": "Movement"},
 	{"action": "move_down", "display": "Crouch / Down", "group": "Movement"},
 	{"action": "jump", "display": "Jump", "group": "Actions"},
-	{"action": "place_torch", "display": "Place Torch", "group": "Actions"},
 	{"action": "hotbar_1", "display": "Hotbar 1", "group": "Hotbar"},
 	{"action": "hotbar_2", "display": "Hotbar 2", "group": "Hotbar"},
 	{"action": "hotbar_3", "display": "Hotbar 3", "group": "Hotbar"},

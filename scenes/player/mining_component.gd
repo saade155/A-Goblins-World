@@ -49,7 +49,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	# Block mining when inventory or debug console is open.
-	if GameServer.inventory_open or DebugConsole.console_open:
+	if GameServer.inventory_open or ChatWindow.chat_focused:
 		if _highlight:
 			_highlight.visible = false
 		if current_target != Vector2i(-1, -1):
@@ -155,11 +155,6 @@ func _process(delta: float) -> void:
 					GameServer.request_place_torch(get_parent(), tile_coord)
 				elif ItemDatabase.is_placeable(slot["item_id"]):
 					GameServer.request_place_with_inventory(get_parent(), tile_coord, slot["item_id"])
-
-	# --- Torch placement (T key) ---
-	if in_range and InputManager.is_place_torch_just_pressed():
-		if GameServer.world_data and not GameServer.world_data.has_tile(tile_coord):
-			GameServer.request_place_torch(get_parent(), tile_coord)
 
 
 ## Reset all mining state and hide the progress indicator.

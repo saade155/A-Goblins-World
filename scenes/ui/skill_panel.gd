@@ -21,7 +21,7 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	# Don't toggle skills while the debug console is open (user is typing).
-	if DebugConsole.console_open:
+	if ChatWindow.chat_focused:
 		return
 	if _is_open and event.is_action_pressed("pause"):
 		_close()

@@ -104,7 +104,7 @@ func _close_map() -> void:
 
 func _process(_delta: float) -> void:
 	# Toggle map
-	if not DebugConsole.console_open and InputManager.is_map_toggle_just_pressed():
+	if not ChatWindow.chat_focused and InputManager.is_map_toggle_just_pressed():
 		is_open = not is_open
 		visible = is_open
 		GameServer.map_open = is_open
@@ -114,7 +114,7 @@ func _process(_delta: float) -> void:
 			_is_dragging = false
 
 	# Toggle fog (hotkey — signal handler _on_fog_toggled covers re-render)
-	if not DebugConsole.console_open and InputManager.is_debug_fog_toggle_just_pressed():
+	if not ChatWindow.chat_focused and InputManager.is_debug_fog_toggle_just_pressed():
 		ExplorationTracker.toggle_debug_fog()
 
 	# Update player marker position while open

@@ -30,7 +30,7 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	# Don't toggle pause while any overlay is open — they handle Escape themselves.
-	if DebugConsole.console_open:
+	if ChatWindow.chat_focused:
 		return
 	if GameServer.inventory_open or GameServer.skill_panel_open or GameServer.map_open:
 		return
